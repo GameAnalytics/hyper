@@ -48,6 +48,19 @@ add(Value, #hyper{registers = Registers} = Hyper) ->
 pow(X, Y) ->
     math:pow(X, Y).
 
+union(#hyper{registers = LeftRegisters} = Left,
+      #hyper{registers = RightRegisters} = Right) when
+      Left#hyper.m =:= Right#hyper.m ->
+
+
+    NewRegisters = lists:zipwith(fun max/2,
+                                 tuple_to_list(LeftRegisters),
+                                 tuple_to_list(RightRegisters)),
+
+    Left#hyper{registers = list_to_tuple(NewRegisters)}.
+
+
+
 card(#hyper{alpha = Alpha, m = M, registers = Registers}) ->
     RegistersPow2 =
         lists:map(fun (Register) ->
@@ -86,6 +99,8 @@ card(#hyper{alpha = Alpha, m = M, registers = Registers}) ->
 run_of_zeroes(B) ->
     1 + leading_zeroes(lists:reverse(integer_to_list(B, 2))).
 
+leading_zeroes([]) ->
+    0;
 leading_zeroes([$0 | Rest]) ->
     1 + leading_zeroes(Rest);
 leading_zeroes([$1 | _]) ->
@@ -110,13 +125,51 @@ leading_zeroes([$1 | _]) ->
 %%     error_logger:info_msg("~p~n", [card(add(1, new(4)))]).
 
 ranges_test() ->
-    DistinctValues = [crypto:rand_bytes(128) || _ <- lists:seq(1, 10*1000)],
-    DistinctCount = length(DistinctValues),
+    DistinctValues = sets:from_list(
+                       [crypto:rand_bytes(128) || _ <- lists:seq(1, 10*1000)]),
+    DistinctCount = sets:size(DistinctValues),
 
     Hyper = lists:foldl(fun (V, H) ->
                                 add(V, H)
-                        end, new(15), DistinctValues),
+                        end, new(16), sets:to_list(DistinctValues)),
     error_logger:info_msg("true distinct: ~p, estimated: ~p~n",
                           [DistinctCount, card(Hyper)]).
 
-    
+
+
+union_test() ->
+    random:seed(1, 2, 3),
+    LeftDistinct = sets:from_list(
+                     [random:uniform(10000) || _ <- lists:seq(1, 10*1000)]),
+
+    RightDistinct = sets:from_list(
+                      [random:uniform(5000) || _ <- lists:seq(1, 10000)]),
+
+    LeftHyper = add_many(sets:to_list(LeftDistinct),
+                         new(16)),
+
+    RightHyper = add_many(sets:to_list(RightDistinct),
+                          new(16)),
+
+    UnionHyper = union(LeftHyper, RightHyper),
+    Intersection = card(LeftHyper) + card(RightHyper) - card(UnionHyper),
+
+    error_logger:info_msg("left distinct: ~p~n"
+                          "right distinct: ~p~n"
+                          "true union: ~p~n"
+                          "true intersection: ~p~n"
+                          "estimated union: ~p~n"
+                          "estimated intersection: ~p~n",
+                          [sets:size(LeftDistinct),
+                           sets:size(RightDistinct),
+                           sets:size(
+                             sets:union(LeftDistinct, RightDistinct)),
+                           sets:size(
+                             sets:intersection(LeftDistinct, RightDistinct)),
+                           card(UnionHyper),
+                           Intersection
+                          ]).
+
+add_many(L, Hyper) ->
+    lists:foldl(fun add/2, Hyper, L).
+                        
