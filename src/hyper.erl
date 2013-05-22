@@ -1,6 +1,8 @@
 -module(hyper).
 -include_lib("eunit/include/eunit.hrl").
 
+-export([new/1, insert/2, card/1, union/2]).
+
 -record(hyper, {alpha, p, m, registers}).
 
 new(P) when 4 =< P andalso P =< 16 ->
@@ -40,12 +42,12 @@ union(#hyper{registers = LeftRegisters} = Left,
       #hyper{registers = RightRegisters} = Right) when
       Left#hyper.m =:= Right#hyper.m ->
 
+    NewRegisters = array:map(fun (Index, LeftValue) ->
+                                     max(LeftValue,
+                                         array:get(Index, RightRegisters))
+                             end, LeftRegisters),
 
-    NewRegisters = lists:zipwith(fun max/2,
-                                 tuple_to_list(LeftRegisters),
-                                 tuple_to_list(RightRegisters)),
-
-    Left#hyper{registers = list_to_tuple(NewRegisters)}.
+    Left#hyper{registers = NewRegisters}.
 
 card(#hyper{alpha = Alpha, m = M, registers = Registers}) ->
     RegistersPow2 =
@@ -99,68 +101,69 @@ run_of_zeroes(I, B) ->
 %%
 
 basic_test() ->
-    error_logger:info_msg("~p~n", [card(insert(1, new(4)))]).
+    ?assertEqual(1, trunc(card(insert(1, new(4))))).
 
 
-ranges_test_() ->
-    {timeout, 60000,
-     fun() ->
-             Card = 1000000,
-             {GenerateUsec, Values} = timer:tc(fun () -> generate_unique(Card) end),
-             error_logger:info_msg("generated ~p unique in ~.2f ms~n",
-                                   [Card, GenerateUsec / 1000]),
+%% ranges_test_() ->
+%%     {timeout, 60000,
+%%      fun() ->
+%%              Card = 1000000,
+%%              {GenerateUsec, Values} = timer:tc(fun () -> generate_unique(Card) end),
+%%              error_logger:info_msg("generated ~p unique in ~.2f ms~n",
+%%                                    [Card, GenerateUsec / 1000]),
 
-             {Usec, Hyper} = timer:tc(
-                               fun () ->
-                                       lists:foldl(fun (V, H) ->
-                                                           insert(V, H)
-                                                   end,
-                                                   new(16), Values)
-                               end),
-             error_logger:info_msg("true distinct: ~p, estimated: ~p, in ~.2f ms~n"
-                                   "~.2f per second~n",
-                                   [Card, card(Hyper), Usec / 1000,
-                                    Card / (Usec / 1000 / 1000)])
-     end}.
-
-
-
-%% union_test() ->
-%%     random:seed(1, 2, 3),
-%%     LeftDistinct = sets:from_list(
-%%                      [random:uniform(10000) || _ <- lists:seq(1, 10*1000)]),
-
-%%     RightDistinct = sets:from_list(
-%%                       [random:uniform(5000) || _ <- lists:seq(1, 10000)]),
-
-%%     LeftHyper = add_many(sets:to_list(LeftDistinct),
-%%                          new(16)),
-
-%%     RightHyper = add_many(sets:to_list(RightDistinct),
-%%                           new(16)),
-
-%%     UnionHyper = union(LeftHyper, RightHyper),
-%%     Intersection = card(LeftHyper) + card(RightHyper) - card(UnionHyper),
-
-%%     error_logger:info_msg("left distinct: ~p~n"
-%%                           "right distinct: ~p~n"
-%%                           "true union: ~p~n"
-%%                           "true intersection: ~p~n"
-%%                           "estimated union: ~p~n"
-%%                           "estimated intersection: ~p~n",
-%%                           [sets:size(LeftDistinct),
-%%                            sets:size(RightDistinct),
-%%                            sets:size(
-%%                              sets:union(LeftDistinct, RightDistinct)),
-%%                            sets:size(
-%%                              sets:intersection(LeftDistinct, RightDistinct)),
-%%                            card(UnionHyper),
-%%                            Intersection
-%%                           ]).
+%%              {Usec, Hyper} = timer:tc(
+%%                                fun () ->
+%%                                        lists:foldl(fun (V, H) ->
+%%                                                            insert(V, H)
+%%                                                    end,
+%%                                                    new(16), Values)
+%%                                end),
+%%              error_logger:info_msg("true distinct: ~p, estimated: ~p, in ~.2f ms~n"
+%%                                    "~.2f per second~n",
+%%                                    [Card, card(Hyper), Usec / 1000,
+%%                                     Card / (Usec / 1000 / 1000)])
+%%      end}.
 
 
-report_wrapper_test_() ->
-    [{timeout, 600000000, ?_test(estimate_report())}].
+
+
+union_test() ->
+    random:seed(1, 2, 3),
+
+    LeftDistinct = sets:from_list(
+                     [random:uniform(10000) || _ <- lists:seq(1, 10*1000)]),
+
+    RightDistinct = sets:from_list(
+                      [random:uniform(5000) || _ <- lists:seq(1, 10000)]),
+
+    LeftHyper = insert_many(sets:to_list(LeftDistinct),
+                            new(16)),
+
+    RightHyper = insert_many(sets:to_list(RightDistinct),
+                             new(16)),
+
+    UnionHyper = union(LeftHyper, RightHyper),
+    Intersection = card(LeftHyper) + card(RightHyper) - card(UnionHyper),
+
+    error_logger:info_msg("left distinct: ~p~n"
+                          "right distinct: ~p~n"
+                          "true union: ~p~n"
+                          "true intersection: ~p~n"
+                          "estimated union: ~p~n"
+                          "estimated intersection: ~p~n",
+                          [sets:size(LeftDistinct),
+                           sets:size(RightDistinct),
+                           sets:size(
+                             sets:union(LeftDistinct, RightDistinct)),
+                           sets:size(
+                             sets:intersection(LeftDistinct, RightDistinct)),
+                           card(UnionHyper),
+                           Intersection
+                          ]).
+
+%% report_wrapper_test_() ->
+%%     [{timeout, 600000000, ?_test(estimate_report())}].
 
 estimate_report() ->
     random:seed(erlang:now()),
@@ -208,13 +211,6 @@ run_report(P, Card, Repetitions) ->
 
 
 generate_unique(N) ->
-    %% Rand = [random:uniform(100000000000000) || _ <- lists:seq(1, N)],
-    %% sets:to_list(
-    %%   generate_unique(
-    %%     %% sets:from_list(Rand),
-    %%     sets:from_list(random_bytes(N)),
-    %%     N)).
-
     generate_unique(lists:usort(random_bytes(N)), N).
 
 
