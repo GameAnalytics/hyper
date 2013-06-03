@@ -2,24 +2,14 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -export([new/1, insert/2, card/1, union/2]).
+-export([to_json/1, from_json/1]).
 
--record(hyper, {alpha, p, m, registers}).
+-record(hyper, {p, registers}).
 
 new(P) when 4 =< P andalso P =< 16 ->
-    M = trunc(math:pow(2, P)),
-    Alpha = case M of
-                16 ->
-                    0.673;
-                32 ->
-                    0.697;
-                64 ->
-                    0.709;
-                M ->
-                    0.7213 / (1 + 1.079 / M)
-            end,
-
-    #hyper{alpha = Alpha, m = M, p = P,
-           registers = array:new([{size, M}, {fixed, true}, {default, 0}])}.
+    M = trunc(pow(2, P)),
+    Registers = array:new([{size, M}, {fixed, true}, {default, 0}]),
+    #hyper{p = P, registers = Registers}.
 
 
 insert(Value, #hyper{registers = Registers, p = P} = Hyper) ->
@@ -35,12 +25,9 @@ insert(Value, #hyper{registers = Registers, p = P} = Hyper) ->
             Hyper
     end.
 
-pow(X, Y) ->
-    math:pow(X, Y).
-
 union(#hyper{registers = LeftRegisters} = Left,
       #hyper{registers = RightRegisters} = Right) when
-      Left#hyper.m =:= Right#hyper.m ->
+      Left#hyper.p =:= Right#hyper.p ->
 
     NewRegisters = array:map(fun (Index, LeftValue) ->
                                      max(LeftValue,
@@ -49,14 +36,15 @@ union(#hyper{registers = LeftRegisters} = Left,
 
     Left#hyper{registers = NewRegisters}.
 
-card(#hyper{alpha = Alpha, m = M, registers = Registers}) ->
+card(#hyper{registers = Registers, p = P}) ->
     RegistersPow2 =
         lists:map(fun (Register) ->
                           pow(2, -Register)
                   end, array:to_list(Registers)),
     RegisterSum = lists:sum(RegistersPow2),
 
-    DVEst = Alpha * pow(M, 2) * (1 / RegisterSum),
+    M = trunc(pow(2, P)),
+    DVEst = alpha(M) * pow(M, 2) * (1 / RegisterSum),
 
     TwoPower32 = pow(2, 32),
 
@@ -79,10 +67,41 @@ card(#hyper{alpha = Alpha, m = M, registers = Registers}) ->
     end.
 
 
+%%
+%% SERIALIZATION
+%%
 
-%% @doc: Count run of zeroes from the right
-%% run_of_zeroes(B) ->
-%%     run_of_zeroes(B, bit_size(B)).
+to_json(Hyper) ->
+    {[
+      {<<"p">>, Hyper#hyper.p},
+      {<<"registers">>, array:to_list(array:resize(Hyper#hyper.registers))}
+     ]}.
+
+from_json({Struct}) ->
+    P = proplists:get_value(<<"p">>, Struct),
+    M = trunc(math:pow(2, P)),
+    Registers = array:fix(
+                  array:resize(
+                    M, array:from_list(
+                         proplists:get_value(<<"registers">>, Struct), 0))),
+
+    #hyper{p = P, registers = Registers}.
+
+
+alpha(16) -> 0.673;
+alpha(32) -> 0.697;
+alpha(64) -> 0.709;
+alpha(M)  -> 0.7213 / (1 + 1.079 / M).
+
+%%
+%% HELPERS
+%%
+
+
+pow(X, Y) ->
+    math:pow(X, Y).
+
+
 
 run_of_zeroes(B) ->
     run_of_zeroes(1, B).
@@ -102,6 +121,11 @@ run_of_zeroes(I, B) ->
 
 basic_test() ->
     ?assertEqual(1, trunc(card(insert(1, new(4))))).
+
+
+serialization_test() ->
+    Hyper = insert_many(generate_unique(1024), new(14)),
+    ?assertEqual(trunc(card(Hyper)), trunc(card(from_json(to_json(Hyper))))).
 
 
 %% ranges_test_() ->
