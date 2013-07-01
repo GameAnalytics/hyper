@@ -6,6 +6,10 @@
 
 -record(hyper, {p, registers}).
 
+%%
+%% API
+%%
+
 new(P) when 4 =< P andalso P =< 16 ->
     M = trunc(pow(2, P)),
     Registers = array:new([{size, M}, {fixed, true}, {default, 0}]),
@@ -74,7 +78,7 @@ card(#hyper{registers = Registers, p = P}) ->
 to_json(Hyper) ->
     {[
       {<<"p">>, Hyper#hyper.p},
-      {<<"registers">>, array:to_list(array:resize(Hyper#hyper.registers))}
+      {<<"registers">>, encode_registers(Hyper#hyper.registers)}
      ]}.
 
 from_json({Struct}) ->
@@ -83,9 +87,31 @@ from_json({Struct}) ->
     Registers = array:fix(
                   array:resize(
                     M, array:from_list(
-                         proplists:get_value(<<"registers">>, Struct), 0))),
+                         decode_registers(proplists:get_value(<<"registers">>, Struct)),
+                         0))),
 
     #hyper{p = P, registers = Registers}.
+
+encode_registers(Registers) ->
+    ByteEncoded = array:foldl(fun (_I, V, A) ->
+                                      [<<V:8/integer>> | A]
+                              end, [], array:resize(Registers)),
+
+    base64:encode(
+      iolist_to_binary(
+        lists:reverse(ByteEncoded))).
+
+decode_registers(B) ->
+    decode_registers(base64:decode(B), []).
+
+decode_registers(<<>>, Acc) ->
+    lists:reverse(Acc);
+decode_registers(<<I:8/integer, Rest/binary>>, Acc) ->
+    decode_registers(Rest, [I | Acc]).
+
+%%
+%% HELPERS
+%%
 
 
 alpha(16) -> 0.673;
@@ -93,15 +119,8 @@ alpha(32) -> 0.697;
 alpha(64) -> 0.709;
 alpha(M)  -> 0.7213 / (1 + 1.079 / M).
 
-%%
-%% HELPERS
-%%
-
-
 pow(X, Y) ->
     math:pow(X, Y).
-
-
 
 run_of_zeroes(B) ->
     run_of_zeroes(1, B).
@@ -127,27 +146,22 @@ serialization_test() ->
     Hyper = insert_many(generate_unique(1024), new(14)),
     ?assertEqual(trunc(card(Hyper)), trunc(card(from_json(to_json(Hyper))))).
 
+encoding_test() ->
+    Hyper = insert_many(generate_unique(100000), new(14)),
+    ?assertEqual(trunc(card(Hyper)), trunc(card(from_json(to_json(Hyper))))).
 
-%% ranges_test_() ->
-%%     {timeout, 60000,
-%%      fun() ->
-%%              Card = 1000000,
-%%              {GenerateUsec, Values} = timer:tc(fun () -> generate_unique(Card) end),
-%%              error_logger:info_msg("generated ~p unique in ~.2f ms~n",
-%%                                    [Card, GenerateUsec / 1000]),
 
-%%              {Usec, Hyper} = timer:tc(
-%%                                fun () ->
-%%                                        lists:foldl(fun (V, H) ->
-%%                                                            insert(V, H)
-%%                                                    end,
-%%                                                    new(16), Values)
-%%                                end),
-%%              error_logger:info_msg("true distinct: ~p, estimated: ~p, in ~.2f ms~n"
-%%                                    "~.2f per second~n",
-%%                                    [Card, card(Hyper), Usec / 1000,
-%%                                     Card / (Usec / 1000 / 1000)])
-%%      end}.
+error_range_test() ->
+    Run = fun (Cardinality, P) ->
+                  lists:foldl(fun (V, H) ->
+                                      insert(V, H)
+                              end, new(P), generate_unique(Cardinality))
+          end,
+    Card = 100000,
+    Delta = abs(Card - card(Run(Card, 16))),
+    ?assert(Delta < Card * 0.01).
+
+
 
 
 
