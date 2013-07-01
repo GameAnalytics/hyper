@@ -98,11 +98,12 @@ encode_registers(Registers) ->
                               end, [], array:resize(Registers)),
 
     base64:encode(
-      iolist_to_binary(
-        lists:reverse(ByteEncoded))).
+      zlib:gzip(
+        iolist_to_binary(
+          lists:reverse(ByteEncoded)))).
 
 decode_registers(B) ->
-    decode_registers(base64:decode(B), []).
+    decode_registers(zlib:gunzip(base64:decode(B)), []).
 
 decode_registers(<<>>, Acc) ->
     lists:reverse(Acc);
