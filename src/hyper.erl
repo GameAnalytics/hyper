@@ -1,7 +1,8 @@
+%% @doc: Implementation of HyperLogLog.
 -module(hyper).
 -include_lib("eunit/include/eunit.hrl").
 
--export([new/1, insert/2, card/1, union/2]).
+-export([new/1, insert/2, card/1, union/1, union/2]).
 -export([to_json/1, from_json/1]).
 
 -record(hyper, {p, registers}).
