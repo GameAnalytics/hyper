@@ -1,25 +1,39 @@
-%% @doc: Implementation of HyperLogLog.
+%% @doc: Implementation of HyperLogLog with bias correction as
+%% described in the Google paper,
+%% http://static.googleusercontent.com/external_content/untrusted_dlcp/
+%% research.google.com/en//pubs/archive/40671.pdf
 -module(hyper).
 -include_lib("eunit/include/eunit.hrl").
 
 -export([new/1, insert/2, card/1, union/1, union/2]).
 -export([to_json/1, from_json/1]).
+-compile(native).
 
 -record(hyper, {p, registers}).
+
+-type precision() :: 4..16.
+-type value()     :: binary().
+-type filter()    :: #hyper{}.
+
+-export_type([filter/0]).
+
 
 %%
 %% API
 %%
 
+-spec new(precision()) -> filter().
 new(P) when 4 =< P andalso P =< 16 ->
     M = trunc(pow(2, P)),
     Registers = array:new([{size, M}, {fixed, true}, {default, 0}]),
     #hyper{p = P, registers = Registers}.
 
 
-insert(Value, #hyper{registers = Registers, p = P} = Hyper) ->
-    Hash = erlang:phash2(Value, 4294967296), % 2^32
-    <<Index:P, RegisterValue/bitstring>> = <<Hash:32>>,
+-spec insert(value(), filter()) -> filter().
+insert(Value, #hyper{registers = Registers, p = P} = Hyper)
+  when is_binary(Value) ->
+    Hash = crypto:hash(sha, Value),
+    <<Index:P, RegisterValue:P/bitstring, _/bitstring>> = Hash,
 
     ZeroCount = run_of_zeroes(RegisterValue) + 1,
 
@@ -28,8 +42,13 @@ insert(Value, #hyper{registers = Registers, p = P} = Hyper) ->
             Hyper#hyper{registers = array:set(Index, ZeroCount, Registers)};
         false ->
             Hyper
-    end.
+    end;
 
+insert(_Value, _Hyper) ->
+    error(badarg).
+
+
+-spec union([filter()]) -> filter().
 union(Filters) when is_list(Filters) ->
     %% Must have the same P
     case lists:usort(lists:map(fun (H) -> H#hyper.p end, Filters)) of
@@ -48,47 +67,48 @@ union(#hyper{registers = LeftRegisters} = Left,
 
     Left#hyper{registers = NewRegisters}.
 
+
+-spec card(filter()) -> float().
 card(#hyper{registers = Registers, p = P}) ->
-    RegistersPow2 =
-        lists:map(fun (Register) ->
-                          pow(2, -Register)
-                  end, array:to_list(Registers)),
-    RegisterSum = lists:sum(RegistersPow2),
-
     M = trunc(pow(2, P)),
-    DVEst = alpha(M) * pow(M, 2) * (1 / RegisterSum),
+    RegisterSum = lists:sum(lists:map(fun (Register) ->
+                                              pow(2, -Register)
+                                      end, array:to_list(Registers))),
 
-    TwoPower32 = pow(2, 32),
+    E = alpha(M) * pow(M, 2) / RegisterSum,
+    Ep = case E =< 5 * M of
+             true -> E - estimate_bias(E, P);
+             false -> E
+         end,
 
-    if
-        DVEst < 5/2 * M ->
-            ZeroRegisters =
-                length(
-                  lists:filter(fun (Register) -> Register =:= 0 end,
-                               array:to_list(Registers))),
-            case ZeroRegisters of
-                0 ->
-                    DVEst;
-                _ ->
-                    M * math:log(M / ZeroRegisters)
-            end;
-        DVEst =< (1/30 * TwoPower32) ->
-            DVEst;
-        DVEst >= (1/30 * TwoPower32) ->
-            pow(-2, 32) * math:log(1 - DVEst/TwoPower32)
+    V = length(lists:filter(fun (Register) -> Register =:= 0 end,
+                            array:to_list(Registers))),
+    H = case V of
+            0 ->
+                Ep;
+            _ ->
+                M * math:log(M / V)
+            end,
+
+    case H =< hyper_const:threshold(P) of
+        true ->
+            H;
+        false ->
+            Ep
     end.
-
 
 %%
 %% SERIALIZATION
 %%
 
+-spec to_json(filter()) -> any().
 to_json(Hyper) ->
     {[
       {<<"p">>, Hyper#hyper.p},
       {<<"registers">>, encode_registers(Hyper#hyper.registers)}
      ]}.
 
+-spec from_json(any()) -> filter().
 from_json({Struct}) ->
     P = proplists:get_value(<<"p">>, Struct),
     M = trunc(math:pow(2, P)),
@@ -142,13 +162,30 @@ run_of_zeroes(I, B) ->
             I - 1
     end.
 
+estimate_bias(E, P) ->
+    BiasVector = list_to_tuple(hyper_const:bias_data(P)),
+    NearestNeighbours = nearest_neighbours(E, list_to_tuple(hyper_const:estimate_data(P))),
+    lists:sum([element(Index, BiasVector) || Index <- NearestNeighbours])
+        / length(NearestNeighbours).
+
+nearest_neighbours(E, Vector) ->
+    Distances = lists:map(fun (Index) ->
+                                  V = element(Index, Vector),
+                                  {pow((E - V), 2), Index}
+                          end, lists:seq(1, size(Vector))),
+    SortedDistances = lists:keysort(1, Distances),
+
+    {_, Indexes} = lists:unzip(lists:sublist(SortedDistances, 6)),
+    Indexes.
+
+
 
 %%
 %% TESTS
 %%
 
 basic_test() ->
-    ?assertEqual(1, trunc(card(insert(1, new(4))))).
+    ?assertEqual(1, trunc(card(insert(<<"1">>, new(4))))).
 
 
 serialization_test() ->
@@ -166,10 +203,15 @@ error_range_test() ->
                                       insert(V, H)
                               end, new(P), generate_unique(Cardinality))
           end,
-    Card = 100000,
-    Delta = abs(Card - card(Run(Card, 16))),
-    ?assert(Delta < Card * 0.01).
 
+    Report = lists:map(
+               fun (Card) ->
+                       CardString = string:left(integer_to_list(Card), 10, $ ),
+
+                       Estimate = trunc(card(Run(Card, 14))),
+                       io_lib:format("~s ~p~n", [CardString, Estimate])
+               end, lists:seq(0, 50000, 1000)),
+    error_logger:info_msg("~s~n", [Report]).
 
 
 many_union_test() ->
@@ -189,17 +231,14 @@ many_union_test() ->
 union_test() ->
     random:seed(1, 2, 3),
 
-    LeftDistinct = sets:from_list(
-                     [random:uniform(10000) || _ <- lists:seq(1, 10*1000)]),
+    LeftDistinct = sets:from_list(generate_unique(10000)),
 
-    RightDistinct = sets:from_list(
-                      [random:uniform(5000) || _ <- lists:seq(1, 10000)]),
+    RightDistinct = sets:from_list(generate_unique(5000)
+                                   ++ lists:sublist(sets:to_list(LeftDistinct),
+                                                    5000)),
 
-    LeftHyper = insert_many(sets:to_list(LeftDistinct),
-                            new(16)),
-
-    RightHyper = insert_many(sets:to_list(RightDistinct),
-                             new(16)),
+    LeftHyper = insert_many(sets:to_list(LeftDistinct), new(13)),
+    RightHyper = insert_many(sets:to_list(RightDistinct), new(13)),
 
     UnionHyper = union(LeftHyper, RightHyper),
     Intersection = card(LeftHyper) + card(RightHyper) - card(UnionHyper),
@@ -225,9 +264,9 @@ union_test() ->
 
 estimate_report() ->
     random:seed(erlang:now()),
-    Ps = lists:seq(4, 16, 1),
+    Ps = lists:seq(10, 16, 1),
     Cardinalities = [100, 1000, 10000, 100000, 1000000],
-    Repetitions = 60,
+    Repetitions = 50,
 
     %% Ps = [4, 5],
     %% Cardinalities = [100],
