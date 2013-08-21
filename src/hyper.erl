@@ -5,7 +5,7 @@
 -module(hyper).
 -include_lib("eunit/include/eunit.hrl").
 
--export([new/1, insert/2, card/1, union/1, union/2]).
+-export([new/1, insert/2, card/1, union/1, union/2, intersect_card/2]).
 -export([to_json/1, from_json/1]).
 -compile(native).
 
@@ -66,6 +66,13 @@ union(#hyper{registers = LeftRegisters} = Left,
                              end, LeftRegisters),
 
     Left#hyper{registers = NewRegisters}.
+
+
+%% NOTE: use with caution, no guarantees on accuracy.
+-spec intersect_card(filter(), filter()) -> float().
+intersect_card(Left, Right) when Left#hyper.p =:= Right#hyper.p ->
+    max(0.0, (card(Left) + card(Right)) - card(union(Left, Right))).
+
 
 
 -spec card(filter()) -> float().
@@ -258,6 +265,27 @@ union_test() ->
                            card(UnionHyper),
                            Intersection
                           ]).
+
+intersect_card_test() ->
+    random:seed(1, 2, 3),
+
+    LeftDistinct = sets:from_list(generate_unique(10000)),
+
+    RightDistinct = sets:from_list(generate_unique(5000)
+                                   ++ lists:sublist(sets:to_list(LeftDistinct),
+                                                    5000)),
+
+    LeftHyper = insert_many(sets:to_list(LeftDistinct), new(13)),
+    RightHyper = insert_many(sets:to_list(RightDistinct), new(13)),
+
+    IntersectCard = intersect_card(LeftHyper, RightHyper),
+
+    ?assert(IntersectCard =< hyper:card(hyper:union(LeftHyper, RightHyper))),
+
+    %% NOTE: we can't really say much about the error here,
+    %% so just pick something and see if the intersection makes sense
+    Error = 0.05,
+    ?assert((abs(5000 - IntersectCard) / 5000) =< Error).
 
 %% report_wrapper_test_() ->
 %%     [{timeout, 600000000, ?_test(estimate_report())}].
