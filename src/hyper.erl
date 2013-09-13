@@ -68,12 +68,10 @@ union(#hyper{registers = LeftRegisters} = Left,
       Left#hyper.p =:= Right#hyper.p ->
 
     Start = now(),
-    NewRegisters = bisect:from_orddict(
-                     bisect:new(2, 1),
-                     bisect_map(fun (Index, LeftValue) ->
-                                        {Index, max(LeftValue,
-                                                    bisect:find(RightRegisters, Index))}
-                                end, LeftRegisters)),
+    NewRegisters = bisect:merge(fun (Index, LeftValue, RightValue) ->
+                                        max(LeftValue, RightValue)
+                                end, LeftRegisters, RightRegisters),
+
     error_logger:info_msg("single union in ~.2f ms~n",
                           [timer:now_diff(now(), Start) / 1000]),
 
@@ -253,15 +251,18 @@ bisect_map(F, K, B, Acc) ->
 %%             < (Card * NumSets) * 0.1).
 
 
-time_test() ->
-    random:seed(1, 2, 3),
-    Filters = [insert_many(generate_unique(10000), new(15)) || _ <- lists:seq(1, 31)],
+time_test_() ->
+    {timeout, 30,
+     fun() ->
+             random:seed(1, 2, 3),
+             Filters = [insert_many(generate_unique(100000), new(15)) || _ <- lists:seq(1, 31)],
 
-    Start = now(),
-    union(Filters),
-    error_logger:info_msg("union of 31 filters in ~.2f ms~n",
-                          [timer:now_diff(now(), Start) / 1000]),
-    ok.
+             Start = now(),
+             union(Filters),
+             error_logger:info_msg("union of 31 filters in ~.2f ms~n",
+                                   [timer:now_diff(now(), Start) / 1000]),
+             ok
+     end}.
 
 
 %% union_test() ->
