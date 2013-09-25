@@ -60,10 +60,11 @@ union(#hyper{registers = LeftRegisters} = Left,
       #hyper{registers = RightRegisters} = Right) when
       Left#hyper.p =:= Right#hyper.p ->
 
-    NewRegisters = array:map(fun (Index, LeftValue) ->
-                                     max(LeftValue,
-                                         array:get(Index, RightRegisters))
-                             end, LeftRegisters),
+    NewRegisters = array:sparse_foldl(
+                     fun (Index, LeftValue, Registers) ->
+                             Max = max(LeftValue, array:get(Index, Registers)),
+                             array:set(Index, Max, Registers)
+                     end, RightRegisters, LeftRegisters),
 
     Left#hyper{registers = NewRegisters}.
 
