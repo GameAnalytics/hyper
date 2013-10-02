@@ -120,11 +120,16 @@ to_json(Hyper) ->
 from_json({Struct}) ->
     P = proplists:get_value(<<"p">>, Struct),
     M = trunc(math:pow(2, P)),
-    Registers = array:fix(
-                  array:resize(
-                    M, array:from_list(
-                         decode_registers(proplists:get_value(<<"registers">>, Struct)),
-                         0))),
+
+    EmptyArray = array:new([{size, M}, {fixed, true}, {default, 0}]),
+    {_, Registers} = lists:foldl(fun (0, {I, A}) ->
+                                         {I+1, A};
+                                     (V, {I, A}) ->
+                                         {I+1, array:set(I, V, A)}
+                                 end,
+                                 {0, EmptyArray},
+                                 decode_registers(
+                                   proplists:get_value(<<"registers">>, Struct))),
 
     #hyper{p = P, registers = Registers}.
 
@@ -197,8 +202,9 @@ basic_test() ->
 
 
 serialization_test() ->
-    Hyper = insert_many(generate_unique(1024), new(14)),
-    ?assertEqual(trunc(card(Hyper)), trunc(card(from_json(to_json(Hyper))))).
+    Hyper = insert_many(generate_unique(10), new(14)),
+    ?assertEqual(trunc(card(Hyper)), trunc(card(from_json(to_json(Hyper))))),
+    ?assertEqual(Hyper, from_json(to_json(Hyper))).
 
 encoding_test() ->
     Hyper = insert_many(generate_unique(100000), new(14)),
