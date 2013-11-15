@@ -57,16 +57,20 @@ union(Filters) when is_list(Filters) ->
     end.
 
 union(#hyper{registers = LeftRegisters} = Left,
-      #hyper{registers = RightRegisters} = Right) when
-      Left#hyper.p =:= Right#hyper.p ->
+      #hyper{registers = RightRegisters} = Right)
+  when Left#hyper.p =:= Right#hyper.p ->
 
     NewRegisters = array:sparse_foldl(
                      fun (Index, LeftValue, Registers) ->
-                             Max = max(LeftValue, array:get(Index, Registers)),
-                             array:set(Index, Max, Registers)
+                             case array:get(Index, Registers) of
+                                 Less when Less < LeftValue ->
+                                     array:set(Index, LeftValue, Registers);
+                                 _ ->
+                                     Registers
+                             end
                      end, RightRegisters, LeftRegisters),
 
-    Left#hyper{registers = NewRegisters}.
+    Right#hyper{registers = NewRegisters}.
 
 
 %% NOTE: use with caution, no guarantees on accuracy.
