@@ -24,9 +24,7 @@
 
 -spec new(precision()) -> filter().
 new(P) when 4 =< P andalso P =< 16 ->
-    M = trunc(pow(2, P)),
-    Registers = array:new([{size, M}, {fixed, true}, {default, 0}]),
-    #hyper{p = P, registers = Registers}.
+    #hyper{p = P, registers = gb_trees:empty()}.
 
 
 -spec insert(value(), filter()) -> filter().
@@ -37,11 +35,13 @@ insert(Value, #hyper{registers = Registers, p = P} = Hyper)
 
     ZeroCount = run_of_zeroes(RegisterValue) + 1,
 
-    case array:get(Index, Hyper#hyper.registers) < ZeroCount of
-        true ->
-            Hyper#hyper{registers = array:set(Index, ZeroCount, Registers)};
-        false ->
-            Hyper
+    case gb_trees:lookup(Index, Hyper#hyper.registers) of
+        {value, Small} when Small < ZeroCount ->
+            Hyper#hyper{registers = gb_trees:enter(Index, ZeroCount, Registers)};
+        {value, Large} when ZeroCount =< Large ->
+            Hyper;
+        none ->
+            Hyper#hyper{registers = gb_trees:enter(Index, ZeroCount, Registers)}
     end;
 
 insert(_Value, _Hyper) ->
@@ -59,18 +59,35 @@ union(Filters) when is_list(Filters) ->
 union(#hyper{registers = LeftRegisters} = Left,
       #hyper{registers = RightRegisters} = Right)
   when Left#hyper.p =:= Right#hyper.p ->
+    %% NewRegisters =
+    %%     gb_trees:from_orddict(
+    %%       orddict:merge(fun (_Index, L, R) -> max(L, R) end,
+    %%                     gb_trees:to_list(LeftRegisters),
+    %%                     gb_trees:to_list(RightRegisters))),
 
-    NewRegisters = array:sparse_foldl(
-                     fun (Index, LeftValue, Registers) ->
-                             case array:get(Index, Registers) of
-                                 Less when Less < LeftValue ->
-                                     array:set(Index, LeftValue, Registers);
-                                 _ ->
-                                     Registers
-                             end
-                     end, RightRegisters, LeftRegisters),
+    NewRegisters = gb_fold(fun (Index, L, Registers) ->
+                                   case gb_trees:lookup(Index, Registers) of
+                                       {value, R} when R < L ->
+                                           gb_trees:enter(Index, L, Registers);
+                                       {value, _} ->
+                                           Registers;
+                                       none ->
+                                           gb_trees:enter(Index, L, Registers)
+                                   end
+                           end, RightRegisters, LeftRegisters),
 
     Right#hyper{registers = NewRegisters}.
+
+
+gb_fold(F, A, {_, T}) when is_function(F, 3) ->
+    gb_fold_1(F, A, T).
+
+gb_fold_1(F, Acc0, {Key, Value, Small, Big}) ->
+    Acc1 = gb_fold_1(F, Acc0, Small),
+    Acc = F(Key, Value, Acc1),
+    gb_fold_1(F, Acc, Big);
+gb_fold_1(_, Acc, _) ->
+    Acc.
 
 
 %% NOTE: use with caution, no guarantees on accuracy.
@@ -83,9 +100,15 @@ intersect_card(Left, Right) when Left#hyper.p =:= Right#hyper.p ->
 -spec card(filter()) -> float().
 card(#hyper{registers = Registers, p = P}) ->
     M = trunc(pow(2, P)),
-    RegisterSum = lists:sum(lists:map(fun (Register) ->
-                                              pow(2, -Register)
-                                      end, array:to_list(Registers))),
+
+    RegisterSum = lists:sum(lists:map(fun (I) ->
+                                              case gb_trees:lookup(I, Registers) of
+                                                  {value, R} ->
+                                                      pow(2, -R);
+                                                  none ->
+                                                      pow(2, -0)
+                                              end
+                                      end, lists:seq(0, M-1))),
 
     E = alpha(M) * pow(M, 2) / RegisterSum,
     Ep = case E =< 5 * M of
@@ -93,8 +116,9 @@ card(#hyper{registers = Registers, p = P}) ->
              false -> E
          end,
 
-    V = length(lists:filter(fun (Register) -> Register =:= 0 end,
-                            array:to_list(Registers))),
+    V = length(lists:filter(fun (I) ->
+                                    gb_trees:lookup(I, Registers) =:= none
+                            end, lists:seq(0, M-1))),
     H = case V of
             0 ->
                 Ep;
@@ -115,40 +139,42 @@ card(#hyper{registers = Registers, p = P}) ->
 
 -spec to_json(filter()) -> any().
 to_json(Hyper) ->
+    M = trunc(pow(2, Hyper#hyper.p)),
     {[
       {<<"p">>, Hyper#hyper.p},
-      {<<"registers">>, encode_registers(Hyper#hyper.registers)}
+      {<<"registers">>, encode_registers(M, Hyper#hyper.registers)}
      ]}.
 
 -spec from_json(any()) -> filter().
 from_json({Struct}) ->
     P = proplists:get_value(<<"p">>, Struct),
-    M = trunc(math:pow(2, P)),
-
-    EmptyArray = array:new([{size, M}, {fixed, true}, {default, 0}]),
     {_, Registers} = lists:foldl(fun (0, {I, A}) ->
                                          {I+1, A};
                                      (V, {I, A}) ->
-                                         {I+1, array:set(I, V, A)}
+                                         {I+1, gb_trees:enter(I, V, A)}
                                  end,
-                                 {0, EmptyArray},
+                                 {0, gb_trees:empty()},
                                  decode_registers(
                                    proplists:get_value(<<"registers">>, Struct))),
 
     #hyper{p = P, registers = Registers}.
 
-encode_registers(Registers) ->
-    ByteEncoded = array:foldl(fun (_I, V, A) ->
-                                      [<<V:8/integer>> | A]
-                              end, [], array:resize(Registers)),
-
+encode_registers(M, Registers) ->
+    ByteEncoded = lists:map(fun (I) ->
+                                    case gb_trees:lookup(I, Registers) of
+                                        {value, V} ->
+                                            <<V:8/integer>>;
+                                        none ->
+                                            <<0>>
+                                    end
+                            end, lists:seq(0, M)),
     base64:encode(
       zlib:gzip(
-        iolist_to_binary(
-          lists:reverse(ByteEncoded)))).
+        iolist_to_binary(ByteEncoded))).
 
 decode_registers(B) ->
-    decode_registers(zlib:gunzip(base64:decode(B)), []).
+    ByteEncoded = zlib:gunzip(base64:decode(B)),
+    decode_registers(ByteEncoded, []).
 
 decode_registers(<<>>, Acc) ->
     lists:reverse(Acc);
@@ -207,8 +233,13 @@ basic_test() ->
 
 serialization_test() ->
     Hyper = insert_many(generate_unique(10), new(14)),
+
+    L = Hyper#hyper.registers,
+    R = (from_json(to_json(Hyper)))#hyper.registers,
+
     ?assertEqual(trunc(card(Hyper)), trunc(card(from_json(to_json(Hyper))))),
-    ?assertEqual(Hyper, from_json(to_json(Hyper))).
+    ?assertEqual(Hyper#hyper.p, (from_json(to_json(Hyper)))#hyper.p),
+    ?assertEqual(gb_trees:to_list(L), gb_trees:to_list(R)).
 
 encoding_test() ->
     Hyper = insert_many(generate_unique(100000), new(14)),
@@ -240,7 +271,8 @@ many_union_test() ->
     Sets = [sets:from_list(generate_unique(Card)) || _ <- lists:seq(1, NumSets)],
     Filters = lists:map(fun (S) -> insert_many(sets:to_list(S), new(14)) end,
                         Sets),
-
+    error_logger:info_msg("expected: ~p, estimated: ~p~n",
+                          [sets:size(sets:union(Sets)), card(union(Filters))]),
     ?assert(abs(sets:size(sets:union(Sets)) - card(union(Filters)))
             < (Card * NumSets) * 0.1).
 
@@ -346,6 +378,8 @@ run_report(P, Card, Repetitions) ->
     {P, Card, Mean, P99, P1, trunc(pow(2, P))}.
 
 
+
+
 generate_unique(N) ->
     generate_unique(lists:usort(random_bytes(N)), N).
 
@@ -367,10 +401,5 @@ random_bytes(Acc, N) ->
     Int = random:uniform(100000000000000),
     random_bytes([<<Int:64/integer>> | Acc], N-1).
 
-
-
-
-
 insert_many(L, Hyper) ->
     lists:foldl(fun insert/2, Hyper, L).
-                        
