@@ -59,12 +59,6 @@ union(Filters) when is_list(Filters) ->
 union(#hyper{registers = LeftRegisters} = Left,
       #hyper{registers = RightRegisters} = Right)
   when Left#hyper.p =:= Right#hyper.p ->
-    %% NewRegisters =
-    %%     gb_trees:from_orddict(
-    %%       orddict:merge(fun (_Index, L, R) -> max(L, R) end,
-    %%                     gb_trees:to_list(LeftRegisters),
-    %%                     gb_trees:to_list(RightRegisters))),
-
     NewRegisters = gb_fold(fun (Index, L, Registers) ->
                                    case gb_trees:lookup(Index, Registers) of
                                        {value, R} when R < L ->
@@ -79,17 +73,6 @@ union(#hyper{registers = LeftRegisters} = Left,
     Right#hyper{registers = NewRegisters}.
 
 
-gb_fold(F, A, {_, T}) when is_function(F, 3) ->
-    gb_fold_1(F, A, T).
-
-gb_fold_1(F, Acc0, {Key, Value, Small, Big}) ->
-    Acc1 = gb_fold_1(F, Acc0, Small),
-    Acc = F(Key, Value, Acc1),
-    gb_fold_1(F, Acc, Big);
-gb_fold_1(_, Acc, _) ->
-    Acc.
-
-
 %% NOTE: use with caution, no guarantees on accuracy.
 -spec intersect_card(filter(), filter()) -> float().
 intersect_card(Left, Right) when Left#hyper.p =:= Right#hyper.p ->
@@ -101,14 +84,11 @@ intersect_card(Left, Right) when Left#hyper.p =:= Right#hyper.p ->
 card(#hyper{registers = Registers, p = P}) ->
     M = trunc(pow(2, P)),
 
-    RegisterSum = lists:sum(lists:map(fun (I) ->
-                                              case gb_trees:lookup(I, Registers) of
-                                                  {value, R} ->
-                                                      pow(2, -R);
-                                                  none ->
-                                                      pow(2, -0)
-                                              end
-                                      end, lists:seq(0, M-1))),
+    RegisterSum = lists:sum(
+                    map_registers(fun ({value, R}) -> pow(2, -R);
+                                      (none)       -> pow(2, -0)
+                                  end,
+                                  Registers, 0, M-1)),
 
     E = alpha(M) * pow(M, 2) / RegisterSum,
     Ep = case E =< 5 * M of
@@ -116,9 +96,11 @@ card(#hyper{registers = Registers, p = P}) ->
              false -> E
          end,
 
-    V = length(lists:filter(fun (I) ->
-                                    gb_trees:lookup(I, Registers) =:= none
-                            end, lists:seq(0, M-1))),
+    V = length(lists:filter(fun (R) -> R =:= none end,
+                            map_registers(fun (R) -> R end,
+                                          Registers,
+                                          0, M-1))),
+
     H = case V of
             0 ->
                 Ep;
@@ -160,14 +142,11 @@ from_json({Struct}) ->
     #hyper{p = P, registers = Registers}.
 
 encode_registers(M, Registers) ->
-    ByteEncoded = lists:map(fun (I) ->
-                                    case gb_trees:lookup(I, Registers) of
-                                        {value, V} ->
-                                            <<V:8/integer>>;
-                                        none ->
-                                            <<0>>
-                                    end
-                            end, lists:seq(0, M)),
+    ByteEncoded = map_registers(fun ({value, V}) ->
+                                        <<V:8/integer>>;
+                                    (none) ->
+                                        <<0>>
+                                end, Registers, 0, M-1),
     base64:encode(
       zlib:gzip(
         iolist_to_binary(ByteEncoded))).
@@ -184,7 +163,6 @@ decode_registers(<<I:8/integer, Rest/binary>>, Acc) ->
 %%
 %% HELPERS
 %%
-
 
 alpha(16) -> 0.673;
 alpha(32) -> 0.697;
@@ -222,6 +200,27 @@ nearest_neighbours(E, Vector) ->
     Indexes.
 
 
+gb_fold(F, A, {_, T}) when is_function(F, 3) ->
+    gb_fold_1(F, A, T).
+
+gb_fold_1(F, Acc0, {Key, Value, Small, Big}) ->
+    Acc1 = gb_fold_1(F, Acc0, Small),
+    Acc = F(Key, Value, Acc1),
+    gb_fold_1(F, Acc, Big);
+gb_fold_1(_, Acc, _) ->
+    Acc.
+
+
+map_registers(F, R, Start, End) ->
+    map_registers(F, R, Start, End, []).
+
+map_registers(F, R, End, End, Acc) ->
+    lists:reverse([F(gb_trees:lookup(End, R)) | Acc]);
+map_registers(F, R, Start, End, Acc) ->
+    map_registers(F, R, Start+1, End, [F(gb_trees:lookup(Start, R)) | Acc]).
+
+
+
 
 %%
 %% TESTS
@@ -255,9 +254,9 @@ error_range_test() ->
 
     Report = lists:map(
                fun (Card) ->
-                       CardString = string:left(integer_to_list(Card), 10, $ ),
+                       CardString = string:right(integer_to_list(Card), 10, $ ),
 
-                       Estimate = trunc(card(Run(Card, 14))),
+                       Estimate = trunc(card(Run(Card, 15))),
                        io_lib:format("~s ~p~n", [CardString, Estimate])
                end, lists:seq(0, 50000, 1000)),
     error_logger:info_msg("~s~n", [Report]).
