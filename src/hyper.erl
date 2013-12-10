@@ -96,19 +96,11 @@ intersect_card(Left, Right) when Left#hyper.p =:= Right#hyper.p ->
     max(0.0, (card(Left) + card(Right)) - card(union(Left, Right))).
 
 
-
 -spec card(filter()) -> float().
 card(#hyper{registers = Registers, p = P}) ->
     M = trunc(pow(2, P)),
 
-    RegisterSum = lists:sum(lists:map(fun (I) ->
-                                              case gb_trees:lookup(I, Registers) of
-                                                  {value, R} ->
-                                                      pow(2, -R);
-                                                  none ->
-                                                      pow(2, -0)
-                                              end
-                                      end, lists:seq(0, M-1))),
+    RegisterSum = register_sum(M-1, Registers, 0),
 
     E = alpha(M) * pow(M, 2) / RegisterSum,
     Ep = case E =< 5 * M of
@@ -116,9 +108,8 @@ card(#hyper{registers = Registers, p = P}) ->
              false -> E
          end,
 
-    V = length(lists:filter(fun (I) ->
-                                    gb_trees:lookup(I, Registers) =:= none
-                            end, lists:seq(0, M-1))),
+    V = count_zeros(M-1, Registers, 0),
+
     H = case V of
             0 ->
                 Ep;
@@ -159,18 +150,26 @@ from_json({Struct}) ->
 
     #hyper{p = P, registers = Registers}.
 
+
 encode_registers(M, Registers) ->
-    ByteEncoded = lists:map(fun (I) ->
-                                    case gb_trees:lookup(I, Registers) of
-                                        {value, V} ->
-                                            <<V:8/integer>>;
-                                        none ->
-                                            <<0>>
-                                    end
-                            end, lists:seq(0, M)),
+    %% FIXME: shouldn't this be M-1 rather than M?
+    ByteEncoded = encode_registers(M, Registers, []),
     base64:encode(
       zlib:gzip(
         iolist_to_binary(ByteEncoded))).
+
+encode_registers(I, _Registers, ByteEncoded) when I < 0 ->
+    ByteEncoded;
+
+encode_registers(I, Registers, ByteEncoded) when I >= 0 ->
+    Byte = case gb_trees:lookup(I, Registers) of
+               {value, V} ->
+                   <<V:8/integer>>;
+               none ->
+                   <<0>>
+           end,
+    encode_registers(I - 1, Registers, [Byte | ByteEncoded]).
+
 
 decode_registers(B) ->
     ByteEncoded = zlib:gunzip(base64:decode(B)),
@@ -204,6 +203,30 @@ run_of_zeroes(I, B) ->
         _ ->
             I - 1
     end.
+
+
+register_sum(I, _Registers, Sum) when I < 0 ->
+    Sum;
+register_sum(I, Registers, Sum) when I >= 0 ->
+    Val = case gb_trees:lookup(I, Registers) of
+              {value, R} ->
+                  pow(2, -R);
+              none ->
+                  pow(2, -0)
+          end,
+    register_sum(I - 1, Registers, Sum + Val).
+
+count_zeros(I, _Registers, Count) when I < 0 ->
+    Count;
+count_zeros(I, Registers, Count) when I >= 0 ->
+    %% FIXME: shouldn't we also count the value if it is equal to 0?
+    Val = case gb_trees:lookup(I, Registers) =:= none of
+              true  -> 1;
+              false -> 0
+          end,
+    count_zeros(I - 1, Registers, Count + Val).
+
+
 
 estimate_bias(E, P) ->
     BiasVector = list_to_tuple(hyper_const:bias_data(P)),
