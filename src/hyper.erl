@@ -3,11 +3,12 @@
 %% http://static.googleusercontent.com/external_content/untrusted_dlcp/
 %% research.google.com/en//pubs/archive/40671.pdf
 -module(hyper).
+%%-compile(native).
 -include_lib("eunit/include/eunit.hrl").
 
 -export([new/1, new/2, insert/2, card/1, union/1, union/2, intersect_card/2]).
 -export([to_json/1, from_json/1]).
--compile(native).
+-export([size_report/0]).
 
 -type precision() :: 4..16.
 -type registers() :: any().
@@ -26,8 +27,8 @@
 %%
 
 -spec new(precision()) -> filter().
-new(P) when 4 =< P andalso P =< 16 ->
-    #hyper{p = P, registers = {hyper_gb, hyper_gb:new(P)}}.
+new(P) ->
+    new(P, hyper_gb).
 
 -spec new(precision(), module()) -> filter().
 new(P, Mod) when 4 =< P andalso P =< 16 andalso is_atom(Mod) ->
@@ -150,8 +151,7 @@ from_json({Struct}, Mod) ->
 
 
 encode_registers(M, Registers) ->
-    %% FIXME: shouldn't this be M-1 rather than M?
-    ByteEncoded = encode_registers(M, Registers, []),
+    ByteEncoded = encode_registers(M-1, Registers, []),
     base64:encode(
       zlib:gzip(
         iolist_to_binary(ByteEncoded))).
@@ -247,6 +247,7 @@ nearest_neighbours(E, Vector) ->
 %% TESTS
 %%
 
+
 basic_test() ->
     ?assertEqual(1, trunc(card(insert(<<"1">>, new(4))))).
 
@@ -337,6 +338,7 @@ intersect_card_test() ->
     Error = 0.05,
     ?assert((abs(5000 - IntersectCard) / 5000) =< Error).
 
+
 %% report_wrapper_test_() ->
 %%     [{timeout, 600000000, ?_test(estimate_report())}].
 
@@ -410,3 +412,44 @@ random_bytes(Acc, N) ->
 
 insert_many(L, Hyper) ->
     lists:foldl(fun insert/2, Hyper, L).
+
+
+%%
+%% REPORTS
+%%
+
+size_report() ->
+    Ps    = [14, 15],
+    Cards = [1, 100, 1000, 10000, 100000, 1000000],
+    Mods  = [hyper_gb, hyper_array],
+
+    R = [begin
+             H = insert_many(generate_unique(Card),  new(P, Mod)),
+             {Mod, Registers} = H#hyper.registers,
+             Fill = Mod:fold(fun (_, V, Acc) when V > 0 -> Acc+1;
+                                 (_, _, Acc) -> Acc
+                             end, 0, Registers),
+             {Mod, P, Card, Fill, erts_debug:flat_size(Registers) * 8}
+         end || Mod  <- Mods,
+                P    <- Ps,
+                Card <- Cards],
+
+    io:format("~s ~s ~s ~s ~s~n",
+              [string:left("module", 12, $ ),
+               string:left("precision", 12, $ ),
+               string:left("cardinality", 12, $ ),
+               string:left("fill", 12, $ ),
+               string:left("bytes", 12, $ )]),
+
+    lists:foreach(fun ({Mod, P, Card, Fill, Bytes}) ->
+                          M = trunc(math:pow(2, P)),
+                          Filled = io_lib:format("~.2f", [Fill / M]),
+                          io:format("~s ~s ~s ~s ~s~n",
+                                    [
+                                     string:left(atom_to_list(Mod), 12, $ ),
+                                     string:left(integer_to_list(P), 12, $ ),
+                                     string:left(integer_to_list(Card), 12, $ ),
+                                     string:left(Filled, 12, $ ),
+                                     string:left(integer_to_list(Bytes), 12, $ )
+                                    ])
+                  end, R).
