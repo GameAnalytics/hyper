@@ -5,17 +5,20 @@
 -module(hyper).
 -include_lib("eunit/include/eunit.hrl").
 
--export([new/1, insert/2, card/1, union/1, union/2, intersect_card/2]).
+-export([new/1, new/2, insert/2, card/1, union/1, union/2, intersect_card/2]).
 -export([to_json/1, from_json/1]).
 -compile(native).
 
--record(hyper, {p, registers}).
-
 -type precision() :: 4..16.
+-type registers() :: any().
+
+-record(hyper, {p :: precision(),
+                registers :: {module(), registers()}}).
+
 -type value()     :: binary().
 -type filter()    :: #hyper{}.
 
--export_type([filter/0]).
+-export_type([filter/0, precision/0, registers/0]).
 
 
 %%
@@ -24,24 +27,28 @@
 
 -spec new(precision()) -> filter().
 new(P) when 4 =< P andalso P =< 16 ->
-    #hyper{p = P, registers = gb_trees:empty()}.
+    #hyper{p = P, registers = {hyper_gb, hyper_gb:new(P)}}.
+
+-spec new(precision(), module()) -> filter().
+new(P, Mod) when 4 =< P andalso P =< 16 andalso is_atom(Mod) ->
+    #hyper{p = P, registers = {Mod, Mod:new(P)}}.
 
 
 -spec insert(value(), filter()) -> filter().
-insert(Value, #hyper{registers = Registers, p = P} = Hyper)
+insert(Value, #hyper{registers = {Mod, Registers}, p = P} = Hyper)
   when is_binary(Value) ->
     Hash = crypto:hash(sha, Value),
     <<Index:P, RegisterValue:P/bitstring, _/bitstring>> = Hash,
 
     ZeroCount = run_of_zeroes(RegisterValue) + 1,
 
-    case gb_trees:lookup(Index, Hyper#hyper.registers) of
-        {value, Small} when Small < ZeroCount ->
-            Hyper#hyper{registers = gb_trees:enter(Index, ZeroCount, Registers)};
-        {value, Large} when ZeroCount =< Large ->
+    case Mod:get(Index, Registers) of
+        {ok, Small} when Small < ZeroCount ->
+            Hyper#hyper{registers = {Mod, Mod:set(Index, ZeroCount, Registers)}};
+        {ok, Large} when ZeroCount =< Large ->
             Hyper;
-        none ->
-            Hyper#hyper{registers = gb_trees:enter(Index, ZeroCount, Registers)}
+        undefined ->
+            Hyper#hyper{registers = {Mod, Mod:set(Index, ZeroCount, Registers)}}
     end;
 
 insert(_Value, _Hyper) ->
@@ -56,38 +63,25 @@ union(Filters) when is_list(Filters) ->
             lists:foldl(fun union/2, hyper:new(P), Filters)
     end.
 
-union(#hyper{registers = LeftRegisters} = Left,
-      #hyper{registers = RightRegisters} = Right)
+union(#hyper{registers = {Mod, LeftRegisters}} = Left,
+      #hyper{registers = {Mod, RightRegisters}} = Right)
   when Left#hyper.p =:= Right#hyper.p ->
-    %% NewRegisters =
-    %%     gb_trees:from_orddict(
-    %%       orddict:merge(fun (_Index, L, R) -> max(L, R) end,
-    %%                     gb_trees:to_list(LeftRegisters),
-    %%                     gb_trees:to_list(RightRegisters))),
 
-    NewRegisters = gb_fold(fun (Index, L, Registers) ->
-                                   case gb_trees:lookup(Index, Registers) of
-                                       {value, R} when R < L ->
-                                           gb_trees:enter(Index, L, Registers);
-                                       {value, _} ->
+    NewRegisters = Mod:fold(fun (Index, L, Registers) ->
+                                    case Mod:get(Index, Registers) of
+                                       {ok, R} when R < L ->
+                                           Mod:set(Index, L, Registers);
+                                       {ok, _} ->
                                            Registers;
-                                       none ->
-                                           gb_trees:enter(Index, L, Registers)
+                                       undefined ->
+                                           Mod:set(Index, L, Registers)
                                    end
-                           end, RightRegisters, LeftRegisters),
+                            end, RightRegisters, LeftRegisters),
 
-    Right#hyper{registers = NewRegisters}.
+    Right#hyper{registers = {Mod, NewRegisters}}.
 
 
-gb_fold(F, A, {_, T}) when is_function(F, 3) ->
-    gb_fold_1(F, A, T).
 
-gb_fold_1(F, Acc0, {Key, Value, Small, Big}) ->
-    Acc1 = gb_fold_1(F, Acc0, Small),
-    Acc = F(Key, Value, Acc1),
-    gb_fold_1(F, Acc, Big);
-gb_fold_1(_, Acc, _) ->
-    Acc.
 
 
 %% NOTE: use with caution, no guarantees on accuracy.
@@ -97,10 +91,10 @@ intersect_card(Left, Right) when Left#hyper.p =:= Right#hyper.p ->
 
 
 -spec card(filter()) -> float().
-card(#hyper{registers = Registers, p = P}) ->
+card(#hyper{registers = {Mod, Registers}, p = P}) ->
     M = trunc(pow(2, P)),
 
-    RegisterSum = register_sum(M-1, Registers, 0),
+    RegisterSum = register_sum(M-1, Mod, Registers, 0),
 
     E = alpha(M) * pow(M, 2) / RegisterSum,
     Ep = case E =< 5 * M of
@@ -108,7 +102,7 @@ card(#hyper{registers = Registers, p = P}) ->
              false -> E
          end,
 
-    V = count_zeros(M-1, Registers, 0),
+    V = count_zeros(M-1, Mod, Registers, 0),
 
     H = case V of
             0 ->
@@ -137,18 +131,22 @@ to_json(Hyper) ->
      ]}.
 
 -spec from_json(any()) -> filter().
-from_json({Struct}) ->
+from_json(Struct) ->
+    from_json(Struct, hyper_gb).
+
+-spec from_json(any(), module()) -> filter().
+from_json({Struct}, Mod) ->
     P = proplists:get_value(<<"p">>, Struct),
     {_, Registers} = lists:foldl(fun (0, {I, A}) ->
                                          {I+1, A};
                                      (V, {I, A}) ->
-                                         {I+1, gb_trees:enter(I, V, A)}
+                                         {I+1, Mod:set(I, V, A)}
                                  end,
-                                 {0, gb_trees:empty()},
+                                 {0, Mod:new(P)},
                                  decode_registers(
                                    proplists:get_value(<<"registers">>, Struct))),
 
-    #hyper{p = P, registers = Registers}.
+    #hyper{p = P, registers = {Mod, Registers}}.
 
 
 encode_registers(M, Registers) ->
@@ -161,14 +159,14 @@ encode_registers(M, Registers) ->
 encode_registers(I, _Registers, ByteEncoded) when I < 0 ->
     ByteEncoded;
 
-encode_registers(I, Registers, ByteEncoded) when I >= 0 ->
-    Byte = case gb_trees:lookup(I, Registers) of
-               {value, V} ->
+encode_registers(I, {Mod, Registers}, ByteEncoded) when I >= 0 ->
+    Byte = case Mod:get(I, Registers) of
+               {ok, V} ->
                    <<V:8/integer>>;
-               none ->
+               undefined ->
                    <<0>>
            end,
-    encode_registers(I - 1, Registers, [Byte | ByteEncoded]).
+    encode_registers(I - 1, {Mod, Registers}, [Byte | ByteEncoded]).
 
 
 decode_registers(B) ->
@@ -205,26 +203,25 @@ run_of_zeroes(I, B) ->
     end.
 
 
-register_sum(I, _Registers, Sum) when I < 0 ->
+register_sum(I, _Mod, _Registers, Sum) when I < 0 ->
     Sum;
-register_sum(I, Registers, Sum) when I >= 0 ->
-    Val = case gb_trees:lookup(I, Registers) of
-              {value, R} ->
+register_sum(I, Mod, Registers, Sum) when I >= 0 ->
+    Val = case Mod:get(I, Registers) of
+              {ok, R} ->
                   pow(2, -R);
-              none ->
+              undefined ->
                   pow(2, -0)
           end,
-    register_sum(I - 1, Registers, Sum + Val).
+    register_sum(I - 1, Mod, Registers, Sum + Val).
 
-count_zeros(I, _Registers, Count) when I < 0 ->
+count_zeros(I, _Mod, _Registers, Count) when I < 0 ->
     Count;
-count_zeros(I, Registers, Count) when I >= 0 ->
-    %% FIXME: shouldn't we also count the value if it is equal to 0?
-    Val = case gb_trees:lookup(I, Registers) =:= none of
+count_zeros(I, Mod, Registers, Count) when I >= 0 ->
+    Val = case Mod:get(I, Registers) =:= undefined of
               true  -> 1;
               false -> 0
           end,
-    count_zeros(I - 1, Registers, Count + Val).
+    count_zeros(I - 1, Mod, Registers, Count + Val).
 
 
 
@@ -255,10 +252,10 @@ basic_test() ->
 
 
 serialization_test() ->
-    Hyper = insert_many(generate_unique(10), new(14)),
+    Hyper = insert_many(generate_unique(10), new(14, hyper_gb)),
 
-    L = Hyper#hyper.registers,
-    R = (from_json(to_json(Hyper)))#hyper.registers,
+    {hyper_gb, L} = Hyper#hyper.registers,
+    {hyper_gb, R} = (from_json(to_json(Hyper)))#hyper.registers,
 
     ?assertEqual(trunc(card(Hyper)), trunc(card(from_json(to_json(Hyper))))),
     ?assertEqual(Hyper#hyper.p, (from_json(to_json(Hyper)))#hyper.p),
