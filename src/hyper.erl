@@ -8,7 +8,7 @@
 
 -export([new/1, new/2, insert/2, card/1, union/1, union/2, intersect_card/2]).
 -export([to_json/1, from_json/1]).
--export([size_report/0]).
+-export([perf_report/0]).
 
 -type precision() :: 4..16.
 -type registers() :: any().
@@ -275,11 +275,10 @@ error_range_test() ->
           end,
     ExpectedError = 0.02,
     P = 14,
-
     lists:foreach(fun (Card) ->
                           Estimate = trunc(card(Run(Card, P))),
                           ?assert(abs(Estimate - Card) < Card * ExpectedError)
-                  end, lists:seq(1000, 50000, 1000)).
+                  end, lists:seq(10000, 50000, 10000)).
 
 
 
@@ -418,38 +417,63 @@ insert_many(L, Hyper) ->
 %% REPORTS
 %%
 
-size_report() ->
+perf_report() ->
     Ps    = [14, 15],
     Cards = [1, 100, 1000, 10000, 100000, 1000000],
-    Mods  = [hyper_gb, hyper_array],
+    Mods  = [hyper_gb, hyper_array, hyper_bisect],
 
+    Insert = fun (Card, EmptyFilter) ->
+                     Values = generate_unique(Card),
+
+                     Parent = self(),
+                     spawn(fun () ->
+                                   Start = os:timestamp(),
+                                   Parent ! {h,
+                                             insert_many(Values, EmptyFilter),
+                                             timer:now_diff(os:timestamp(), Start)}
+                           end),
+                     receive {h, Hyper, ElapsedUs} ->
+                             {Hyper, ElapsedUs}
+                     end
+             end,
     R = [begin
-             H = insert_many(generate_unique(Card),  new(P, Mod)),
+             {H, ElapsedUs} = Insert(Card, new(P, Mod)),
+
              {Mod, Registers} = H#hyper.registers,
              Fill = Mod:fold(fun (_, V, Acc) when V > 0 -> Acc+1;
                                  (_, _, Acc) -> Acc
                              end, 0, Registers),
-             {Mod, P, Card, Fill, erts_debug:flat_size(Registers) * 8}
+             Bytes = case Mod of
+                         hyper_bisect ->
+                             bisect:num_keys(Registers) * (4 + 1);
+                         _ ->
+                             erts_debug:flat_size(Registers) * 8
+                     end,
+
+             {Mod, P, Card, Fill, Bytes, ElapsedUs}
          end || Mod  <- Mods,
                 P    <- Ps,
                 Card <- Cards],
 
-    io:format("~s ~s ~s ~s ~s~n",
-              [string:left("module", 12, $ ),
-               string:left("precision", 12, $ ),
-               string:left("cardinality", 12, $ ),
-               string:left("fill", 12, $ ),
-               string:left("bytes", 12, $ )]),
+    io:format("~s ~s ~s ~s ~s ~s~n",
+              [string:left("module"    , 12, $ ),
+               string:left("precision" , 10, $ ),
+               string:left("card"      , 10, $ ),
+               string:left("fill"      , 10, $ ),
+               string:left("bytes"     , 10, $ ),
+               string:left("avg insert", 10, $ )]),
 
-    lists:foreach(fun ({Mod, P, Card, Fill, Bytes}) ->
+    lists:foreach(fun ({Mod, P, Card, Fill, Bytes, ElapsedUs}) ->
                           M = trunc(math:pow(2, P)),
                           Filled = io_lib:format("~.2f", [Fill / M]),
-                          io:format("~s ~s ~s ~s ~s~n",
+                          AvgInsertUs = io_lib:format("~.2f", [ElapsedUs / Card]),
+                          io:format("~s ~s ~s ~s ~s ~s~n",
                                     [
-                                     string:left(atom_to_list(Mod), 12, $ ),
-                                     string:left(integer_to_list(P), 12, $ ),
-                                     string:left(integer_to_list(Card), 12, $ ),
-                                     string:left(Filled, 12, $ ),
-                                     string:left(integer_to_list(Bytes), 12, $ )
+                                     string:left(atom_to_list(Mod)     , 12, $ ),
+                                     string:left(integer_to_list(P)    , 10, $ ),
+                                     string:left(integer_to_list(Card) , 10, $ ),
+                                     string:left(Filled                , 10, $ ),
+                                     string:left(integer_to_list(Bytes), 10, $ ),
+                                     string:left(AvgInsertUs           , 10, $ )
                                     ])
                   end, R).
