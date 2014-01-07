@@ -68,7 +68,14 @@ max_merge({sparse, Left, P, T}, {sparse, Right, P, T}) ->
     {sparse, bisect:merge(fun (_Index, L, R) -> max(L, R) end, Left, Right), P, T};
 
 max_merge({dense, Left}, {dense, Right}) ->
-    {dense, iolist_to_binary(lists:reverse(do_dense_merge(Left, Right)))}.
+    {dense, iolist_to_binary(
+              lists:reverse(
+                do_dense_merge(Left, Right)))};
+
+max_merge({dense, Left}, {sparse, Right, P, _}) ->
+    {dense, iolist_to_binary(
+              lists:reverse(
+                do_dense_merge(Left, bisect2dense(Right, P))))}.
 
 
 %%

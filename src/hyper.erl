@@ -58,10 +58,13 @@ insert(_Value, _Hyper) ->
 
 -spec union([filter()]) -> filter().
 union(Filters) when is_list(Filters) ->
-    %% Must have the same P
-    case lists:usort(lists:map(fun (H) -> H#hyper.p end, Filters)) of
-        [P] ->
-            lists:foldl(fun union/2, hyper:new(P), Filters)
+    %% Must have the same P and backend
+    case lists:usort(lists:map(fun (#hyper{p = P, registers = {Mod, _}}) ->
+                                       {P, Mod}
+                               end, Filters)) of
+        [{_P, _Mod}] ->
+            [First | Rest] = Filters,
+            lists:foldl(fun union/2, First, Rest)
     end.
 
 union(#hyper{registers = {Mod, LeftRegisters}} = Left,
@@ -273,12 +276,14 @@ error_range_test() ->
 
 many_union_test() ->
     random:seed(1, 2, 3),
-    Card = 100,
+    Card = 100000,
     NumSets = 3,
 
     Sets = [sets:from_list(generate_unique(Card)) || _ <- lists:seq(1, NumSets)],
-    Filters = lists:map(fun (S) -> insert_many(sets:to_list(S), new(14)) end,
-                        Sets),
+    Filters = lists:map(fun (S) ->
+                                insert_many(sets:to_list(S),
+                                            new(10, hyper_bisect))
+                        end, Sets),
 
     ?assert(abs(sets:size(sets:union(Sets)) - card(union(Filters)))
             < (Card * NumSets) * 0.1).
