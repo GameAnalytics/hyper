@@ -7,9 +7,7 @@ new(P) ->
     array:new([{size, M}, {fixed, true}, {default, 0}]).
 
 get(Index, A) ->
-    case catch array:get(Index, A) of
-        {'EXIT', {badarg, _}} ->
-            error_logger:info_msg("bad: index: ~p~n ~p~n", [Index, A]);
+    case array:get(Index, A) of
         0 ->
             undefined;
         Value ->
