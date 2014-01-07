@@ -409,8 +409,10 @@ insert_many(L, Hyper) ->
 
 perf_report() ->
     Ps    = [15],
-    Cards = [1, 100, 1000, 10000, 100000, 1000000],
+    Cards = [1, 100, 1000, 10000, 25000, 50000, 100000, 1000000],
     Mods  = [hyper_gb, hyper_array, hyper_bisect],
+
+    random:seed(1, 2, 3),
 
     Insert = fun (Card, EmptyFilter) ->
                      Values = generate_unique(Card),
