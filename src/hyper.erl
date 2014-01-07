@@ -275,15 +275,14 @@ error_range_test() ->
                                       insert(V, H)
                               end, new(P), generate_unique(Cardinality))
           end,
+    ExpectedError = 0.02,
+    P = 14,
 
-    Report = lists:map(
-               fun (Card) ->
-                       CardString = string:left(integer_to_list(Card), 10, $ ),
+    lists:foreach(fun (Card) ->
+                          Estimate = trunc(card(Run(Card, P))),
+                          ?assert(abs(Estimate - Card) < Card * ExpectedError)
+                  end, lists:seq(1000, 50000, 1000)).
 
-                       Estimate = trunc(card(Run(Card, 14))),
-                       io_lib:format("~s ~p~n", [CardString, Estimate])
-               end, lists:seq(0, 50000, 1000)),
-    error_logger:info_msg("~s~n", [Report]).
 
 
 many_union_test() ->
@@ -294,8 +293,6 @@ many_union_test() ->
     Sets = [sets:from_list(generate_unique(Card)) || _ <- lists:seq(1, NumSets)],
     Filters = lists:map(fun (S) -> insert_many(sets:to_list(S), new(14)) end,
                         Sets),
-    error_logger:info_msg("expected: ~p, estimated: ~p~n",
-                          [sets:size(sets:union(Sets)), card(union(Filters))]),
     ?assert(abs(sets:size(sets:union(Sets)) - card(union(Filters)))
             < (Card * NumSets) * 0.1).
 
@@ -316,21 +313,11 @@ union_test() ->
     UnionHyper = union(LeftHyper, RightHyper),
     Intersection = card(LeftHyper) + card(RightHyper) - card(UnionHyper),
 
-    error_logger:info_msg("left distinct: ~p~n"
-                          "right distinct: ~p~n"
-                          "true union: ~p~n"
-                          "true intersection: ~p~n"
-                          "estimated union: ~p~n"
-                          "estimated intersection: ~p~n",
-                          [sets:size(LeftDistinct),
-                           sets:size(RightDistinct),
-                           sets:size(
-                             sets:union(LeftDistinct, RightDistinct)),
-                           sets:size(
-                             sets:intersection(LeftDistinct, RightDistinct)),
-                           card(UnionHyper),
-                           Intersection
-                          ]).
+    ?assert(abs(card(UnionHyper) - sets:size(sets:union(LeftDistinct, RightDistinct)))
+            < 200),
+    ?assert(abs(Intersection - sets:size(
+                                 sets:intersection(LeftDistinct, RightDistinct)))
+            < 200).
 
 intersect_card_test() ->
     random:seed(1, 2, 3),
