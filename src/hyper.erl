@@ -28,7 +28,7 @@
 
 -spec new(precision()) -> filter().
 new(P) ->
-    new(P, hyper_bisect).
+    new(P, hyper_gb).
 
 -spec new(precision(), module()) -> filter().
 new(P, Mod) when 4 =< P andalso P =< 16 andalso is_atom(Mod) ->
@@ -238,7 +238,9 @@ nearest_neighbours(E, Vector) ->
 
 
 basic_test() ->
-    ?assertEqual(1, trunc(card(insert(<<"1">>, new(4))))).
+    ?assertEqual(1, trunc(card(insert(<<"1">>, new(4, hyper_bisect))))),
+    ?assertEqual(1, trunc(card(insert(<<"1">>, new(4, hyper_gb))))),
+    ?assertEqual(1, trunc(card(insert(<<"1">>, new(4, hyper_array))))).
 
 
 serialization_test() ->
@@ -406,7 +408,7 @@ insert_many(L, Hyper) ->
 %%
 
 perf_report() ->
-    Ps    = [14, 15],
+    Ps    = [15],
     Cards = [1, 100, 1000, 10000, 100000, 1000000],
     Mods  = [hyper_gb, hyper_array, hyper_bisect],
 
@@ -448,7 +450,12 @@ perf_report() ->
                              end, 0, Registers),
              Bytes = case Mod of
                          hyper_bisect ->
-                             bisect:num_keys(Registers) * (4 + 1);
+                             case Registers of
+                                 {sparse, R, _, _} ->
+                                     bisect:size(R);
+                                 {dense, R} ->
+                                     byte_size(R)
+                             end;
                          _ ->
                              erts_debug:flat_size(Registers) * 8
                      end,
