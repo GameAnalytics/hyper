@@ -1,5 +1,5 @@
 -module(hyper_bisect).
--export([new/1, get/2, set/3, fold/3]).
+-export([new/1, get/2, set/3, fold/3, max_merge/2]).
 -behaviour(hyper_register).
 
 new(_P) ->
@@ -23,3 +23,6 @@ fold(F, Acc, B) ->
                          F(Index, Value, A)
                  end,
     bisect:foldl(B, InterfaceF, Acc).
+
+max_merge(Left, Right) ->
+    bisect:merge(fun (_Index, L, R) -> max(L, R) end, Left, Right).

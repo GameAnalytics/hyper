@@ -1,5 +1,5 @@
 -module(hyper_gb).
--export([new/1, get/2, set/3, fold/3]).
+-export([new/1, get/2, set/3, fold/3, max_merge/2]).
 -behaviour(hyper_register).
 
 new(_P) ->
@@ -16,7 +16,17 @@ get(Index, T) ->
 set(Index, Value, T) ->
     gb_trees:enter(Index, Value, T).
 
-
+max_merge(Left, Right) ->
+    fold(fun (Index, L, Registers) ->
+                 case get(Index, Registers) of
+                     {ok, R} when R < L ->
+                         set(Index, L, Registers);
+                     {ok, _} ->
+                         Registers;
+                     undefined ->
+                         set(Index, L, Registers)
+                 end
+         end, Right, Left).
 
 fold(F, A, {_, T}) when is_function(F, 3) ->
     fold_1(F, A, T).

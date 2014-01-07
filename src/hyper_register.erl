@@ -5,7 +5,7 @@
 -callback set(Index :: integer(), Value :: integer(),
               hyper:registers())                       -> hyper:registers().
 -callback fold(fun(), Acc :: any(), hyper:registers()) -> Acc :: any().
-    
+-callback max_merge(hyper:registers(), hyper:registers()) -> hyper:registers().
     
 
 

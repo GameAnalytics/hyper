@@ -28,7 +28,7 @@
 
 -spec new(precision()) -> filter().
 new(P) ->
-    new(P, hyper_gb).
+    new(P, hyper_bisect).
 
 -spec new(precision(), module()) -> filter().
 new(P, Mod) when 4 =< P andalso P =< 16 andalso is_atom(Mod) ->
@@ -67,18 +67,7 @@ union(Filters) when is_list(Filters) ->
 union(#hyper{registers = {Mod, LeftRegisters}} = Left,
       #hyper{registers = {Mod, RightRegisters}} = Right)
   when Left#hyper.p =:= Right#hyper.p ->
-
-    NewRegisters = Mod:fold(fun (Index, L, Registers) ->
-                                    case Mod:get(Index, Registers) of
-                                       {ok, R} when R < L ->
-                                           Mod:set(Index, L, Registers);
-                                       {ok, _} ->
-                                           Registers;
-                                       undefined ->
-                                           Mod:set(Index, L, Registers)
-                                   end
-                            end, RightRegisters, LeftRegisters),
-
+    NewRegisters = Mod:max_merge(LeftRegisters, RightRegisters),
     Right#hyper{registers = {Mod, NewRegisters}}.
 
 
@@ -280,8 +269,6 @@ error_range_test() ->
                           ?assert(abs(Estimate - Card) < Card * ExpectedError)
                   end, lists:seq(10000, 50000, 10000)).
 
-
-
 many_union_test() ->
     random:seed(1, 2, 3),
     Card = 100,
@@ -290,6 +277,7 @@ many_union_test() ->
     Sets = [sets:from_list(generate_unique(Card)) || _ <- lists:seq(1, NumSets)],
     Filters = lists:map(fun (S) -> insert_many(sets:to_list(S), new(14)) end,
                         Sets),
+
     ?assert(abs(sets:size(sets:union(Sets)) - card(union(Filters)))
             < (Card * NumSets) * 0.1).
 
@@ -428,16 +416,31 @@ perf_report() ->
                      Parent = self(),
                      spawn(fun () ->
                                    Start = os:timestamp(),
-                                   Parent ! {h,
-                                             insert_many(Values, EmptyFilter),
+                                   H = insert_many(Values, EmptyFilter),
+                                   Parent ! {h, H,
                                              timer:now_diff(os:timestamp(), Start)}
                            end),
                      receive {h, Hyper, ElapsedUs} ->
                              {Hyper, ElapsedUs}
                      end
              end,
+
+    Union = fun (Card, EmptyFilter) ->
+                    Left = insert_many(generate_unique(Card), EmptyFilter),
+                    Right = insert_many(generate_unique(Card), EmptyFilter),
+
+                    Parent = self(),
+                    spawn(fun () ->
+                                  Start = os:timestamp(),
+                                  _Union = union(Left, Right),
+                                  Parent ! {union, timer:now_diff(os:timestamp(), Start)}
+                          end),
+                    receive {union, ElapsedUs} -> ElapsedUs end
+            end,
+
     R = [begin
              {H, ElapsedUs} = Insert(Card, new(P, Mod)),
+             UnionUs = Union(Card, new(P, Mod)),
 
              {Mod, Registers} = H#hyper.registers,
              Fill = Mod:fold(fun (_, V, Acc) when V > 0 -> Acc+1;
@@ -450,30 +453,35 @@ perf_report() ->
                              erts_debug:flat_size(Registers) * 8
                      end,
 
-             {Mod, P, Card, Fill, Bytes, ElapsedUs}
+             {Mod, P, Card, Fill, Bytes, ElapsedUs, UnionUs}
          end || Mod  <- Mods,
                 P    <- Ps,
                 Card <- Cards],
 
-    io:format("~s ~s ~s ~s ~s ~s~n",
+    io:format("~s ~s ~s ~s ~s ~s ~s~n",
               [string:left("module"    , 12, $ ),
                string:left("precision" , 10, $ ),
                string:left("card"      , 10, $ ),
                string:left("fill"      , 10, $ ),
                string:left("bytes"     , 10, $ ),
-               string:left("avg insert", 10, $ )]),
+               string:left("insert us" , 10, $ ),
+               string:left("union us"  , 10, $ )
+              ]),
 
-    lists:foreach(fun ({Mod, P, Card, Fill, Bytes, ElapsedUs}) ->
+    lists:foreach(fun ({Mod, P, Card, Fill, Bytes, ElapsedUs, UnionUs}) ->
                           M = trunc(math:pow(2, P)),
-                          Filled = io_lib:format("~.2f", [Fill / M]),
-                          AvgInsertUs = io_lib:format("~.2f", [ElapsedUs / Card]),
-                          io:format("~s ~s ~s ~s ~s ~s~n",
+                          Filled = lists:flatten(io_lib:format("~.2f", [Fill / M])),
+                          AvgInsertUs = lists:flatten(io_lib:format("~.2f",
+                                                                    [ElapsedUs / Card])),
+                          UnionMs = lists:flatten(io_lib:format("~.2f", [UnionUs / 1000])),
+                          io:format("~s ~s ~s ~s ~s ~s ~s~n",
                                     [
                                      string:left(atom_to_list(Mod)     , 12, $ ),
                                      string:left(integer_to_list(P)    , 10, $ ),
                                      string:left(integer_to_list(Card) , 10, $ ),
                                      string:left(Filled                , 10, $ ),
                                      string:left(integer_to_list(Bytes), 10, $ ),
-                                     string:left(AvgInsertUs           , 10, $ )
+                                     string:left(AvgInsertUs           , 10, $ ),
+                                     string:left(UnionMs               , 10, $ )
                                     ])
                   end, R).
