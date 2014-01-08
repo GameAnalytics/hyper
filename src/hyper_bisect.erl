@@ -1,7 +1,7 @@
 -module(hyper_bisect).
 -include_lib("eunit/include/eunit.hrl").
 
--export([new/1, get/2, set/3, fold/3, max_merge/2]).
+-export([new/1, get/2, set/3, fold/3, max_merge/2, bytes/1]).
 -behaviour(hyper_register).
 
 -define(KEY_SIZE, 16).
@@ -78,6 +78,9 @@ max_merge({dense, Dense}, {sparse, Sparse, _, _}) ->
 max_merge({sparse, Sparse, _, _}, {dense, Dense}) ->
     do_dense_sparse_merge({dense, Dense}, bisect:to_orddict(Sparse)).
 
+
+bytes({sparse, Sparse, _, _}) -> bisect:size(Sparse);
+bytes({dense, Dense})         -> erlang:byte_size(Dense).
 
 
 %%

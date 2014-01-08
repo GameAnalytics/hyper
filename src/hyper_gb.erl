@@ -1,5 +1,5 @@
 -module(hyper_gb).
--export([new/1, get/2, set/3, fold/3, max_merge/2]).
+-export([new/1, get/2, set/3, fold/3, max_merge/2, bytes/1]).
 -behaviour(hyper_register).
 
 new(_P) ->
@@ -37,3 +37,6 @@ fold_1(F, Acc0, {Key, Value, Small, Big}) ->
     fold_1(F, Acc, Big);
 fold_1(_, Acc, _) ->
     Acc.
+
+bytes(T) ->
+    erts_debug:flat_size(T) * 8.

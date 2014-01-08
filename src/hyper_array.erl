@@ -1,5 +1,5 @@
 -module(hyper_array).
--export([new/1, get/2, set/3, fold/3, max_merge/2]).
+-export([new/1, get/2, set/3, fold/3, max_merge/2, bytes/1]).
 -behaviour(hyper_register).
 
 new(P) ->
@@ -32,3 +32,6 @@ max_merge(Left, Right) ->
                          set(Index, L, Registers)
                  end
          end, Right, Left).
+
+bytes(A) ->
+    erts_debug:flat_size(A) * 8.
