@@ -72,10 +72,12 @@ max_merge({dense, Left}, {dense, Right}) ->
               lists:reverse(
                 do_dense_merge(Left, Right)))};
 
-max_merge({dense, Left}, {sparse, Right, P, _}) ->
-    {dense, iolist_to_binary(
-              lists:reverse(
-                do_dense_merge(Left, bisect2dense(Right, P))))}.
+max_merge({dense, Dense}, {sparse, Sparse, _, _}) ->
+    do_dense_sparse_merge({dense, Dense}, bisect:to_orddict(Sparse));
+
+max_merge({sparse, Sparse, _, _}, {dense, Dense}) ->
+    do_dense_sparse_merge({dense, Dense}, bisect:to_orddict(Sparse)).
+
 
 
 %%
@@ -86,6 +88,12 @@ do_dense_merge(<<>>, <<>>) ->
     [];
 do_dense_merge(<<Left, LeftRest/binary>>, <<Right, RightRest/binary>>) ->
     [max(Left, Right) | do_dense_merge(LeftRest, RightRest)].
+
+do_dense_sparse_merge({dense, Dense}, []) ->
+    {dense, Dense};
+do_dense_sparse_merge({dense, Dense}, [{<<Index:?KEY_SIZE/integer>>,
+                                        <<Value:?VALUE_SIZE/integer>>} | Rest]) ->
+    do_dense_sparse_merge(set(Index, Value, {dense, Dense}), Rest).
 
 do_dense_fold(F, Acc, B) ->
     do_dense_fold(F, Acc, B, 0).

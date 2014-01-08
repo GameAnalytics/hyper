@@ -311,6 +311,25 @@ union_test() ->
                                  sets:intersection(LeftDistinct, RightDistinct)))
             < 200).
 
+small_big_union_test() ->
+    random:seed(1, 2, 3),
+    SmallCard = 100,
+    BigCard   = 15000, % switches to dense at 10922 items
+
+    SmallSet = sets:from_list(generate_unique(SmallCard)),
+    BigSet   = sets:from_list(generate_unique(BigCard)),
+
+    SmallHyper = insert_many(sets:to_list(SmallSet), new(15, hyper_bisect)),
+    BigHyper   = insert_many(sets:to_list(BigSet), new(15, hyper_bisect)),
+    ?assertMatch({hyper_bisect, {sparse, _, _, _}}, SmallHyper#hyper.registers),
+    ?assertMatch({hyper_bisect, {dense, _}}, BigHyper#hyper.registers),
+
+    UnionHyper = union(SmallHyper, BigHyper),
+    TrueUnion = sets:size(sets:union(SmallSet, BigSet)),
+    ?assert(abs(card(UnionHyper) - TrueUnion) < TrueUnion * 0.01).
+
+
+
 intersect_card_test() ->
     random:seed(1, 2, 3),
 
