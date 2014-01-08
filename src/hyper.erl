@@ -259,6 +259,25 @@ serialization_test() ->
     ?assertEqual(Hyper#hyper.p, (from_json(to_json(Hyper)))#hyper.p),
     ?assertEqual(gb_trees:to_list(L), gb_trees:to_list(R)).
 
+
+backend_test() ->
+    Values = generate_unique(1000),
+
+    Gb     = insert_many(Values, new(14, hyper_gb)),
+    Array  = insert_many(Values, new(14, hyper_array)),
+    Bisect = insert_many(Values, new(14, hyper_bisect)),
+
+    ?assertEqual(card(Gb), card(Array)),
+    ?assertEqual(card(Gb), card(Bisect)),
+
+    ?assertEqual(to_json(Gb), to_json(Array)),
+    ?assertEqual(to_json(Gb), to_json(Bisect)),
+
+    ?assertEqual(Array, from_json(to_json(Array), hyper_array)),
+    ?assertEqual(Array, from_json(to_json(Bisect), hyper_array)),
+    ?assertEqual(Bisect, from_json(to_json(Array), hyper_bisect)).
+
+
 encoding_test() ->
     Hyper = insert_many(generate_unique(100000), new(14)),
     ?assertEqual(trunc(card(Hyper)), trunc(card(from_json(to_json(Hyper))))).
