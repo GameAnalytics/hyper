@@ -7,7 +7,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -export([new/1, new/2, insert/2, card/1, union/1, union/2, intersect_card/2]).
--export([to_json/1, from_json/1]).
+-export([to_json/1, from_json/1, from_json/2]).
 -export([perf_report/0, bytes/1]).
 
 -type precision() :: 4..16.
