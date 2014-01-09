@@ -65,7 +65,7 @@ fold(F, Acc, {dense, B}) ->
 
 
 max_merge({sparse, Small, P, T}, {sparse, Big, P, T}) ->
-    {sparse, bisect:merge(Small, Big)};
+    {sparse, bisect:merge(Small, Big), P, T};
 
 
 max_merge({dense, Left}, {dense, Right}) ->
