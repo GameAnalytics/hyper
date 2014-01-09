@@ -67,11 +67,11 @@ union(Filters) when is_list(Filters) ->
             lists:foldl(fun union/2, First, Rest)
     end.
 
-union(#hyper{registers = {Mod, LeftRegisters}} = Left,
-      #hyper{registers = {Mod, RightRegisters}} = Right)
-  when Left#hyper.p =:= Right#hyper.p ->
-    NewRegisters = Mod:max_merge(LeftRegisters, RightRegisters),
-    Right#hyper{registers = {Mod, NewRegisters}}.
+union(#hyper{registers = {Mod, SmallRegisters}} = Small,
+      #hyper{registers = {Mod, BigRegisters}} = Big)
+  when Small#hyper.p =:= Big#hyper.p ->
+    NewRegisters = Mod:max_merge(SmallRegisters, BigRegisters),
+    Big#hyper{registers = {Mod, NewRegisters}}.
 
 
 
@@ -298,7 +298,7 @@ error_range_test() ->
 
 many_union_test() ->
     random:seed(1, 2, 3),
-    Card = 100000,
+    Card = 1000,
     NumSets = 3,
 
     Sets = [sets:from_list(generate_unique(Card)) || _ <- lists:seq(1, NumSets)],
@@ -455,86 +455,86 @@ insert_many(L, Hyper) ->
 
 perf_report() ->
     Ps    = [15],
-    Cards = [1, 100, 1000, 10000, 25000, 50000, 100000, 1000000],
+    Cards = [1, 100, 1000, 5000, 10000, 15000, 25000, 50000, 100000, 1000000],
     Mods  = [hyper_gb, hyper_array, hyper_bisect],
+    Repeats = 10,
 
     random:seed(1, 2, 3),
 
-    Insert = fun (Card, EmptyFilter) ->
-                     Values = generate_unique(Card),
+    Time = fun (F, Args) ->
+                   Run = fun () ->
+                                 Parent = self(),
+                                 Pid = spawn_link(
+                                         fun () ->
+                                                 {ElapsedUs, _} = timer:tc(F, Args),
+                                                 Parent ! {self(), ElapsedUs}
+                                         end),
+                                 receive {Pid, ElapsedUs} -> ElapsedUs end
+                         end,
+                   [Run() || _ <- lists:seq(1, Repeats)]
+           end,
 
-                     Parent = self(),
-                     spawn(fun () ->
-                                   Start = os:timestamp(),
-                                   H = insert_many(Values, EmptyFilter),
-                                   Parent ! {h, H,
-                                             timer:now_diff(os:timestamp(), Start)}
-                           end),
-                     receive {h, Hyper, ElapsedUs} ->
-                             {Hyper, ElapsedUs}
-                     end
-             end,
-
-    Union = fun (Card, EmptyFilter) ->
-                    Left = insert_many(generate_unique(Card), EmptyFilter),
-                    Right = insert_many(generate_unique(Card), EmptyFilter),
-
-                    Parent = self(),
-                    spawn(fun () ->
-                                  Start = os:timestamp(),
-                                  Union = union(Left, Right),
-                                  CardStart = os:timestamp(),
-                                  _Card = card(Union),
-
-                                  Parent ! {result,
-                                            timer:now_diff(CardStart, Start),
-                                            timer:now_diff(os:timestamp(), CardStart)}
-                          end),
-                    receive {result, UnionUs, CardUs} -> {UnionUs, CardUs} end
-            end,
 
     R = [begin
-             {H, ElapsedUs} = Insert(Card, new(P, Mod)),
-             {UnionUs, CardUs} = Union(Card, new(P, Mod)),
+             InsertUs = Time(fun (Values, H) ->
+                                     insert_many(Values, H)
+                             end,
+                             [generate_unique(Card), new(P, Mod)]),
 
-             {Mod, Registers} = H#hyper.registers,
+             UnionUs = Time(fun union/2,
+                            [insert_many(generate_unique(Card div 10), new(P, Mod)),
+                             insert_many(generate_unique(Card), new(P, Mod))]),
+
+             CardUs = Time(fun card/1,
+                           [insert_many(generate_unique(Card), new(P, Mod))]),
+
+
+             Filter = insert_many(generate_unique(Card), new(P, Mod)),
+             {Mod, Registers} = Filter#hyper.registers,
              Fill = Mod:fold(fun (_, V, Acc) when V > 0 -> Acc+1;
                                  (_, _, Acc) -> Acc
                              end, 0, Registers),
-             Bytes = bytes(H),
+             Bytes = bytes(Filter),
 
-             {Mod, P, Card, Fill, Bytes, ElapsedUs, UnionUs, CardUs}
+             {Mod, P, Card, Fill, Bytes,
+              lists:sum(InsertUs) / Card / Repeats,
+              lists:sum(UnionUs) / Repeats,
+              lists:sum(CardUs) / Repeats}
+
          end || Mod  <- Mods,
                 P    <- Ps,
                 Card <- Cards],
 
     io:format("~s ~s ~s ~s ~s ~s ~s ~s~n",
-              [string:left("module"    , 12, $ ),
-               string:left("precision" , 10, $ ),
-               string:left("card"      , 10, $ ),
-               string:left("fill"      , 10, $ ),
-               string:left("bytes"     , 10, $ ),
-               string:left("insert us" , 10, $ ),
-               string:left("union us"  , 10, $ ),
-               string:left("card us"   , 10, $ )
+              [string:left("module"     , 12, $ ),
+               string:left("precision"  , 10, $ ),
+               string:right("card"      , 10, $ ),
+               string:right("fill"      , 10, $ ),
+               string:right("bytes"     , 10, $ ),
+               string:right("insert us" , 10, $ ),
+               string:right("union ms"  , 10, $ ),
+               string:right("card ms"   , 10, $ )
               ]),
 
-    lists:foreach(fun ({Mod, P, Card, Fill, Bytes, ElapsedUs, UnionUs, CardUs}) ->
+    lists:foreach(fun ({Mod, P, Card, Fill, Bytes, AvgInsertUs, AvgUnionUs, AvgCardUs}) ->
                           M = trunc(math:pow(2, P)),
                           Filled = lists:flatten(io_lib:format("~.2f", [Fill / M])),
-                          AvgInsertUs = lists:flatten(io_lib:format("~.2f",
-                                                                    [ElapsedUs / Card])),
-                          UnionMs = lists:flatten(io_lib:format("~.2f", [UnionUs / 1000])),
-                          CardMs = lists:flatten(io_lib:format("~.2f", [CardUs / 1000])),
+                          AvgInsertUsL = lists:flatten(
+                                     io_lib:format("~.2f", [AvgInsertUs])),
+
+                          UnionMs = lists:flatten(
+                                      io_lib:format("~.2f", [AvgUnionUs / 1000])),
+                          CardMs = lists:flatten(
+                                     io_lib:format("~.2f", [AvgCardUs / 1000])),
                           io:format("~s ~s ~s ~s ~s ~s ~s ~s~n",
                                     [
-                                     string:left(atom_to_list(Mod)     , 12, $ ),
-                                     string:left(integer_to_list(P)    , 10, $ ),
-                                     string:left(integer_to_list(Card) , 10, $ ),
-                                     string:left(Filled                , 10, $ ),
-                                     string:left(integer_to_list(Bytes), 10, $ ),
-                                     string:left(AvgInsertUs           , 10, $ ),
-                                     string:left(UnionMs               , 10, $ ),
-                                     string:left(CardMs                , 10, $ )
+                                     string:left(atom_to_list(Mod)      , 12, $ ),
+                                     string:left(integer_to_list(P)     , 10, $ ),
+                                     string:right(integer_to_list(Card) , 10, $ ),
+                                     string:right(Filled                , 10, $ ),
+                                     string:right(integer_to_list(Bytes), 10, $ ),
+                                     string:right(AvgInsertUsL          , 10, $ ),
+                                     string:right(UnionMs               , 10, $ ),
+                                     string:right(CardMs                , 10, $ )
                                     ])
                   end, R).

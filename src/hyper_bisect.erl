@@ -27,9 +27,7 @@ get(Index, {sparse, B, _, _}) ->
     end;
 
 get(Index, {dense, B}) ->
-    case catch binary:at(B, Index) of
-        {'EXIT', _} ->
-            error_logger:info_msg("dense size: ~p, index: ~p~n", [byte_size(B), Index]);
+    case binary:at(B, Index) of
         0 ->
             undefined;
         V ->
@@ -56,7 +54,9 @@ set(Index, Value, {dense, B}) ->
 
 
 fold(F, Acc, {sparse, B, _, _}) ->
-    InterfaceF = fun (<<Index:?KEY_SIZE/integer>>, <<Value:?VALUE_SIZE/integer>>, A) ->
+    InterfaceF = fun (<<Index:?KEY_SIZE/integer>>,
+                      <<Value:?VALUE_SIZE/integer>>,
+                      A) ->
                          F(Index, Value, A)
                  end,
     bisect:foldl(B, InterfaceF, Acc);
@@ -64,19 +64,24 @@ fold(F, Acc, {dense, B}) ->
     do_dense_fold(F, Acc, B).
 
 
-max_merge({sparse, Left, P, T}, {sparse, Right, P, T}) ->
-    {sparse, bisect:merge(fun (_Index, L, R) -> max(L, R) end, Left, Right), P, T};
+max_merge({sparse, Small, P, T}, {sparse, Big, P, T}) ->
+    {sparse, bisect:merge(Small, Big)};
+
 
 max_merge({dense, Left}, {dense, Right}) ->
     {dense, iolist_to_binary(
               lists:reverse(
                 do_dense_merge(Left, Right)))};
 
-max_merge({dense, Dense}, {sparse, Sparse, _, _}) ->
-    do_dense_sparse_merge({dense, Dense}, bisect:to_orddict(Sparse));
+max_merge({dense, Dense}, {sparse, Sparse, P, _}) ->
+    {dense, iolist_to_binary(
+              lists:reverse(
+                do_dense_merge(Dense, bisect2dense(Sparse, P))))};
 
-max_merge({sparse, Sparse, _, _}, {dense, Dense}) ->
-    do_dense_sparse_merge({dense, Dense}, bisect:to_orddict(Sparse)).
+max_merge({sparse, Sparse, P, _}, {dense, Dense}) ->
+    {dense, iolist_to_binary(
+              lists:reverse(
+                do_dense_merge(Dense, bisect2dense(Sparse, P))))}.
 
 
 bytes({sparse, Sparse, _, _}) -> bisect:size(Sparse);
@@ -92,11 +97,13 @@ do_dense_merge(<<>>, <<>>) ->
 do_dense_merge(<<Left, LeftRest/binary>>, <<Right, RightRest/binary>>) ->
     [max(Left, Right) | do_dense_merge(LeftRest, RightRest)].
 
-do_dense_sparse_merge({dense, Dense}, []) ->
-    {dense, Dense};
-do_dense_sparse_merge({dense, Dense}, [{<<Index:?KEY_SIZE/integer>>,
-                                        <<Value:?VALUE_SIZE/integer>>} | Rest]) ->
-    do_dense_sparse_merge(set(Index, Value, {dense, Dense}), Rest).
+
+do_dense_sparse_merge({dense, Dense}, Bisect) ->
+    bisect:foldl(Bisect, fun (<<Index:?KEY_SIZE/integer>>,
+                              <<Value:?VALUE_SIZE/integer>>,
+                              {dense, D}) ->
+                                 set(Index, Value, {dense, D})
+                         end, {dense, Dense}).
 
 do_dense_fold(F, Acc, B) ->
     do_dense_fold(F, Acc, B, 0).
