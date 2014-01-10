@@ -63,8 +63,8 @@ register_sum({T, M}) ->
 zero_count({T, M}) ->
     M - gb_trees:size(T).
 
-compact(T) ->
-    T.
+compact({T, M}) ->
+    {gb_trees:from_orddict(gb_trees:to_list(T)), M}.
 
 encode_registers({T, M}) ->
     iolist_to_binary(

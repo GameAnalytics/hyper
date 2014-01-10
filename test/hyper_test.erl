@@ -17,7 +17,8 @@ hyper_test_() ->
       ?_test(union_t()),
       ?_test(small_big_union_t()),
       ?_test(intersect_card_t()),
-      {timeout, 600, fun () -> [] = proper:module(?MODULE) end}
+      {timeout, 600, fun () -> [] = proper:module(?MODULE) end},
+      ?_test(bad_serialization_t())
      ]}.
 
 basic_t() ->
@@ -242,6 +243,42 @@ intersect_card_t() ->
     ?assert((abs(5000 - IntersectCard) / 5000) =< Error).
 
 
+
+bad_serialization_t() ->
+    [begin
+         P = 15,
+         M = trunc(math:pow(2, P)),
+         {ok, WithNewlines} = file:read_file("../test/filter.txt"),
+         Raw = case zlib:gunzip(
+                      base64:decode(
+                        binary:replace(WithNewlines, <<"\n">>, <<>>))) of
+                   <<RawBytes:M/binary>> ->
+                       RawBytes;
+                   <<RawBytes:M/binary, 0>> ->
+                       %% TODO: test padding
+                       RawBytes
+               end,
+
+         H = hyper:from_json({[{<<"p">>, 15},
+                               {<<"registers">>, base64:encode(zlib:gzip(Raw))}]},
+                             Mod),
+         {Mod, Registers} = H#hyper.registers,
+         Encoded = Mod:encode_registers(Registers),
+
+         ?assertEqual(size(Raw), size(Encoded)),
+         lists:foreach(fun (I) ->
+                               ?assertEqual(binary:at(Raw, I),
+                                            binary:at(Encoded, I))
+                       end, lists:seq(0, size(Encoded) -1)),
+
+
+         ?assertEqual(Raw, Mod:encode_registers(Registers)),
+
+         ?assertEqual({[{<<"p">>, 15},
+                        {<<"registers">>, base64:encode(zlib:gzip(Raw))}]},
+                      hyper:to_json(H))
+     end || Mod <- backends()].
+
 %%
 %% PROPERTIES
 %%
@@ -311,6 +348,14 @@ prop_getset() ->
                 end
             end).
 
+prop_serialize() ->
+    ?FORALL({Mod, P, Values}, {oneof(backends()), range(4, 16), gen_values()},
+            begin
+                H = hyper:compact(hyper:insert_many(Values, hyper:new(P, Mod))),
+                H =:= hyper:compact(
+                        hyper:from_json(
+                          hyper:to_json(H), Mod))
+            end).
 
 %%
 %% HELPERS
