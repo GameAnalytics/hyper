@@ -1,7 +1,7 @@
 -module(hyper_bisect).
 -include_lib("eunit/include/eunit.hrl").
 
--export([new/1, get/2, set/3, fold/3, max_merge/1, max_merge/2, bytes/1]).
+-export([new/1, set/3, fold/3, max_merge/1, max_merge/2, bytes/1]).
 -export([register_sum/1, zero_count/1, encode_registers/1, decode_registers/2, compact/1]).
 -behaviour(hyper_register).
 
@@ -19,38 +19,30 @@ new(P) ->
     {sparse, bisect:new(?KEY_SIZE div 8, ?VALUE_SIZE div 8), P, Threshold}.
 
 
-get(Index, {sparse, B, _, _}) ->
+set(Index, Value, {sparse, B, P, Threshold} = S) ->
     case bisect:find(B, <<Index:?KEY_SIZE/integer>>) of
-        not_found ->
-            undefined;
-        <<Value:?VALUE_SIZE/integer>> ->
-            {ok, Value}
+        <<R:?VALUE_SIZE/integer>> when R > Value->
+            S;
+        _ ->
+            NewB = bisect:insert(B,
+                                 <<Index:?KEY_SIZE/integer>>,
+                                 <<Value:?VALUE_SIZE/integer>>),
+            case bisect:num_keys(NewB) < Threshold of
+                true ->
+                    {sparse, NewB, P, Threshold};
+                false ->
+                    {dense, bisect2dense(NewB, P)}
+            end
     end;
 
-get(Index, {dense, B}) ->
+set(Index, Value, {dense, B} = D) ->
     case binary:at(B, Index) of
-        0 ->
-            undefined;
-        V ->
-            {ok, V}
+        R when R > Value ->
+            D;
+        _ ->
+            <<Left:Index/binary, _:?VALUE_SIZE, Right/binary>> = B,
+            {dense, iolist_to_binary([Left, <<Value:?VALUE_SIZE/integer>>, Right])}
     end.
-
-
-set(Index, Value, {sparse, B, P, Threshold}) ->
-    NewB = bisect:insert(B,
-                         <<Index:?KEY_SIZE/integer>>,
-                         <<Value:?VALUE_SIZE/integer>>),
-
-    case bisect:num_keys(NewB) < Threshold of
-        true ->
-            {sparse, NewB, P, Threshold};
-        false ->
-            {dense, bisect2dense(NewB, P)}
-    end;
-
-set(Index, Value, {dense, B}) ->
-    <<Left:Index/binary, _:?VALUE_SIZE, Right/binary>> = B,
-    {dense, iolist_to_binary([Left, <<Value:?VALUE_SIZE/integer>>, Right])}.
 
 
 
@@ -235,8 +227,3 @@ bisect2dense_test() ->
                  0, 0, 0, 5>>,
     ?assertEqual(M, size(Expected)),
     ?assertEqual(Expected, Dense).
-
-set_dense_test() ->
-    P = 4,
-    B = set(2, 2, {dense, binary:copy(<<0>>, trunc(math:pow(2, P)))}),
-    ?assertEqual({ok, 2}, get(2, B)).

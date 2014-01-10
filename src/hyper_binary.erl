@@ -1,7 +1,7 @@
 -module(hyper_binary).
 -include_lib("eunit/include/eunit.hrl").
 
--export([new/1, get/2, set/3, fold/3, compact/1, max_merge/1, max_merge/2, bytes/1]).
+-export([new/1, set/3, fold/3, compact/1, max_merge/1, max_merge/2, bytes/1]).
 -export([register_sum/1, zero_count/1, encode_registers/1, decode_registers/2]).
 
 -behaviour(hyper_register).
@@ -17,31 +17,22 @@ new(P) ->
     M = trunc(math:pow(2, P)),
     {dense, binary:copy(<<0>>, M), [], 0}.
 
-
 set(Index, Value, {dense, B, Tmp, TmpCount}) ->
-    NewTmp = orddict:store(Index, Value, Tmp),
-    case TmpCount < 50 of
-        true ->
-            {dense, B, NewTmp, TmpCount+1};
-        false ->
-            {dense, merge_tmp(B, NewTmp), [], 0}
+    case binary:at(B, Index) of
+        R when R < Value ->
+            case lists:keyfind(Index, 1, Tmp) of
+                {Index, TmpR} when TmpR > Value ->
+                    {dense, B, Tmp, TmpCount};
+                _ ->
+                    {dense, B, lists:keystore(Index, 1, Tmp, {Index, Value}), TmpCount+1}
+            end;
+        _ ->
+            {dense, B, Tmp, TmpCount}
     end.
 
-get(Index, {dense, B, Tmp, _TmpCount}) ->
-    case binary:at(B, Index) of
-        0 ->
-            case orddict:find(Index, Tmp) of
-                {ok, V} ->
-                    {ok, V};
-                error ->
-                    undefined
-            end;
-        V ->
-            {ok, V}
-    end.
 
 compact({dense, B, Tmp, _TmpCount}) ->
-    {dense, merge_tmp(B, Tmp), [], 0}.
+    {dense, merge_tmp(B, lists:sort(Tmp)), [], 0}.
 
 fold(F, Acc, {dense, B, Tmp, _}) ->
     do_fold(F, Acc, merge_tmp(B, Tmp)).
@@ -122,13 +113,23 @@ merge_tmp(B, [{Index, Value} | Rest], PrevIndex, Acc) ->
 
 
 merge_test() ->
-    Buffered = lists:foldl(fun (I, Acc) -> set(I, I, Acc) end,
-                           new(4), lists:seq(0, 15)),
-    Compact = compact(Buffered),
-    ?assertEqual(undefined, get(0, Compact)),
-    ?assertEqual({ok, 3}, get(3, Compact)),
-    ?assertEqual({ok, 15}, get(15, Compact)),
-    ?assertError(badarg, get(16, Compact)).
+    Tmp1 = [{1, 1},
+            {3, 3},
+            {9, 3},
+            {15, 15}],
+    Tmp2 = [{3, 5},
+            {9, 2},
+            {10, 5}],
+
+    {dense, NewB, [], 0} = new(4),
+    {dense, Compact, [], 0} = compact({dense, NewB, Tmp1, length(Tmp1)}),
+    {dense, Compact2, [], 0} = compact({dense, Compact, Tmp2, length(Tmp2)}),
+
+    ?assertEqual(<<0, 1, 0, 5,
+                   0, 0, 0, 0,
+                   0, 2, 5, 0,
+                   0, 0, 0, 15>>, Compact2).
+
 
 serialize_test() ->
     H = compact(lists:foldl(fun (I, Acc) -> set(I, I, Acc) end,
@@ -136,4 +137,3 @@ serialize_test() ->
     {dense, B, _, _} = H,
     ?assertEqual(B, encode_registers(H)),
     ?assertEqual(H, decode_registers(encode_registers(H), 4)).
-

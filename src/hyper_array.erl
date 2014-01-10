@@ -1,5 +1,5 @@
 -module(hyper_array).
--export([new/1, get/2, set/3, fold/3, max_merge/2, bytes/1]).
+-export([new/1, set/3, fold/3, max_merge/2, bytes/1]).
 -export([register_sum/1, zero_count/1, encode_registers/1, decode_registers/2, compact/1]).
 -behaviour(hyper_register).
 
@@ -7,30 +7,24 @@ new(P) ->
     M = trunc(math:pow(2, P)),
     array:new([{size, M}, {fixed, true}, {default, 0}]).
 
-get(Index, A) ->
-    case array:get(Index, A) of
-        0 ->
-            undefined;
-        Value ->
-            {ok, Value}
-    end.
-
-
 set(Index, Value, A) ->
-    array:set(Index, Value, A).
+    case array:get(Index, A) of
+        R when R > Value ->
+            A;
+        _ ->
+            array:set(Index, Value, A)
+    end.
 
 fold(F, Acc, A) ->
     array:sparse_foldl(F, Acc, A).
 
 max_merge(Left, Right) ->
     fold(fun (Index, L, Registers) ->
-                 case get(Index, Registers) of
-                     {ok, R} when R < L ->
+                 case array:get(Index, Registers) of
+                     R when R < L ->
                          set(Index, L, Registers);
-                     {ok, _} ->
-                         Registers;
-                     undefined ->
-                         set(Index, L, Registers)
+                     _ ->
+                         Registers
                  end
          end, Right, Left).
 
