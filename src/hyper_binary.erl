@@ -24,7 +24,15 @@ set(Index, Value, {dense, B, Tmp, TmpCount}) ->
                 {Index, TmpR} when TmpR > Value ->
                     {dense, B, Tmp, TmpCount};
                 _ ->
-                    {dense, B, lists:keystore(Index, 1, Tmp, {Index, Value}), TmpCount+1}
+                    New = {dense, B,
+                           lists:keystore(Index, 1, Tmp, {Index, Value}),
+                           TmpCount + 1},
+                    case TmpCount < 100 of
+                        true ->
+                            New;
+                        false ->
+                            compact(New)
+                    end
             end;
         _ ->
             {dense, B, Tmp, TmpCount}

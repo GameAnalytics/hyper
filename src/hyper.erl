@@ -281,7 +281,7 @@ perf_report() ->
     Ps    = [15],
     Cards = [1, 100, 1000, 5000, 10000, 15000, 25000, 50000, 100000, 1000000],
     Mods  = [hyper_gb, hyper_array, hyper_bisect, hyper_binary],
-    Repeats = 1,
+    Repeats = 10,
 
     random:seed(1, 2, 3),
 
@@ -305,16 +305,15 @@ perf_report() ->
                                      insert_many(Values, H)
                              end,
                              [generate_unique(Card), new(P, Mod)]),
+             ReusableH = insert_many(generate_unique(Card), new(P, Mod)),
 
              UnionUs = Time(fun union/2,
                             [insert_many(generate_unique(Card div 10), new(P, Mod)),
-                             insert_many(generate_unique(Card), new(P, Mod))]),
+                             ReusableH]),
 
-             CardUs = Time(fun card/1,
-                           [insert_many(generate_unique(Card), new(P, Mod))]),
+             CardUs = Time(fun card/1, [ReusableH]),
 
-             ToJsonUs = Time(fun to_json/1,
-                             [insert_many(generate_unique(Card), new(P, Mod))]),
+             ToJsonUs = Time(fun to_json/1, [ReusableH]),
 
 
              Filter = insert_many(generate_unique(Card), new(P, Mod)),
