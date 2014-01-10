@@ -1,7 +1,8 @@
 -module(hyper_bisect).
 -include_lib("eunit/include/eunit.hrl").
 
--export([new/1, get/2, set/3, fold/3, max_merge/2, bytes/1]).
+-export([new/1, get/2, set/3, fold/3, max_merge/1, max_merge/2, bytes/1]).
+-export([register_sum/1, zero_count/1, encode_registers/1, decode_registers/2, compact/1]).
 -behaviour(hyper_register).
 
 -define(KEY_SIZE, 16).
@@ -64,6 +65,13 @@ fold(F, Acc, {dense, B}) ->
     do_dense_fold(F, Acc, B).
 
 
+max_merge(Registers) ->
+    [First | Rest] = Registers,
+    lists:foldl(fun (R, Acc) ->
+                        max_merge(R, Acc)
+                end, First, Rest).
+
+
 max_merge({sparse, Small, P, T}, {sparse, Big, P, T}) ->
     {sparse, bisect:merge(Small, Big), P, T};
 
@@ -84,8 +92,77 @@ max_merge({sparse, Sparse, P, _}, {dense, Dense}) ->
                 do_dense_merge(Dense, bisect2dense(Sparse, P))))}.
 
 
+compact(B) ->
+    B.
+
 bytes({sparse, Sparse, _, _}) -> bisect:size(Sparse);
 bytes({dense, Dense})         -> erlang:byte_size(Dense).
+
+
+register_sum(B) ->
+    M = case B of
+            {dense, Bytes} -> erlang:byte_size(Bytes);
+            {sparse, _, P, _} -> trunc(math:pow(2, P))
+        end,
+
+    {MaxI, Sum} = fold(fun (Index, Value, {I, Acc}) ->
+                               Zeros = Index - I - 1,
+                               {Index, Acc + math:pow(2, -Value)
+                                + (math:pow(2, -0) * Zeros)}
+                       end, {-1, 0}, B),
+    Sum + (M - 1 - MaxI) * math:pow(2, -0).
+
+zero_count({dense, _} = B) ->
+    fold(fun (_, 0, Acc) -> Acc + 1;
+             (_, _, Acc) -> Acc
+         end, 0, B);
+zero_count({sparse, B, P, _}) ->
+    M = trunc(math:pow(2, P)),
+    M - bisect:num_keys(B).
+
+encode_registers({dense, B}) ->
+    B;
+encode_registers({sparse, B, P, _}) ->
+    M = trunc(math:pow(2, P)),
+    iolist_to_binary(
+      encode_registers(M-1, B, [])).
+
+
+encode_registers(I, _B, ByteEncoded) when I < 0 ->
+    ByteEncoded;
+
+encode_registers(I, B, ByteEncoded) when I >= 0 ->
+    Byte = case bisect:find(B, <<I:?KEY_SIZE/integer>>) of
+               not_found ->
+                   <<0>>;
+               V ->
+                   V % already encoded
+           end,
+    encode_registers(I - 1, B, [Byte | ByteEncoded]).
+
+
+
+decode_registers(Bytes, P) ->
+    DenseSize = trunc(math:pow(2, P)),
+    EntrySize = (?KEY_SIZE + ?VALUE_SIZE) div 8,
+    Threshold = DenseSize div EntrySize,
+
+    L = do_decode_registers(Bytes, 0),
+    case length(L) < Threshold of
+        true ->
+            B = bisect:new(?KEY_SIZE div 8, ?VALUE_SIZE div 8),
+            {sparse, bisect:from_orddict(B, L), P, Threshold};
+        false ->
+            {dense, Bytes}
+    end.
+
+do_decode_registers(<<>>, _) ->
+    [];
+do_decode_registers(<<0, Rest/binary>>, I) ->
+    do_decode_registers(Rest, I+1);
+do_decode_registers(<<Value:?VALUE_SIZE, Rest/binary>>, I) ->
+    [{<<I:?KEY_SIZE/integer>>, <<Value:?VALUE_SIZE/integer>>}
+     | do_decode_registers(Rest, I+1)].
 
 
 %%

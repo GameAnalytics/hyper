@@ -7,7 +7,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -export([new/1, new/2, insert/2, card/1, union/1, union/2, intersect_card/2]).
--export([to_json/1, from_json/1, from_json/2]).
+-export([to_json/1, from_json/1, from_json/2, compact/1]).
 -export([perf_report/0, bytes/1]).
 
 -type precision() :: 4..16.
@@ -28,7 +28,7 @@
 
 -spec new(precision()) -> filter().
 new(P) ->
-    new(P, hyper_gb).
+    new(P, hyper_binary).
 
 -spec new(precision(), module()) -> filter().
 new(P, Mod) when 4 =< P andalso P =< 16 andalso is_atom(Mod) ->
@@ -62,9 +62,13 @@ union(Filters) when is_list(Filters) ->
     case lists:usort(lists:map(fun (#hyper{p = P, registers = {Mod, _}}) ->
                                        {P, Mod}
                                end, Filters)) of
-        [{_P, _Mod}] ->
-            [First | Rest] = Filters,
-            lists:foldl(fun union/2, First, Rest)
+        [{_P, Mod}] ->
+            Registers = lists:map(fun (#hyper{registers = {_, R}}) ->
+                                          R
+                                  end, Filters),
+
+            [First | _] = Filters,
+            First#hyper{registers = {Mod, Mod:max_merge(Registers)}}
     end.
 
 union(#hyper{registers = {Mod, SmallRegisters}} = Small,
@@ -84,10 +88,11 @@ intersect_card(Left, Right) when Left#hyper.p =:= Right#hyper.p ->
 
 
 -spec card(filter()) -> float().
-card(#hyper{registers = {Mod, Registers}, p = P}) ->
+card(#hyper{registers = {Mod, Registers0}, p = P}) ->
     M = trunc(pow(2, P)),
+    Registers = Mod:compact(Registers0),
 
-    RegisterSum = register_sum(M-1, Mod, Registers, 0),
+    RegisterSum = Mod:register_sum(Registers),
 
     E = alpha(M) * pow(M, 2) / RegisterSum,
     Ep = case E =< 5 * M of
@@ -95,7 +100,7 @@ card(#hyper{registers = {Mod, Registers}, p = P}) ->
              false -> E
          end,
 
-    V = count_zeros(M-1, Mod, Registers, 0),
+    V = Mod:zero_count(Registers),
 
     H = case V of
             0 ->
@@ -114,16 +119,21 @@ card(#hyper{registers = {Mod, Registers}, p = P}) ->
 bytes(#hyper{registers = {Mod, Registers}}) ->
     Mod:bytes(Registers).
 
+compact(#hyper{registers = {Mod, Registers}} = Hyper) ->
+    Hyper#hyper{registers = {Mod, Mod:compact(Registers)}}.
+
 %%
 %% SERIALIZATION
 %%
 
 -spec to_json(filter()) -> any().
-to_json(Hyper) ->
-    M = trunc(pow(2, Hyper#hyper.p)),
+to_json(#hyper{p = P, registers = {Mod, Registers}}) ->
+    Compact = Mod:compact(Registers),
     {[
-      {<<"p">>, Hyper#hyper.p},
-      {<<"registers">>, encode_registers(M, Hyper#hyper.registers)}
+      {<<"p">>, P},
+      {<<"registers">>, base64:encode(
+                          zlib:gzip(
+                            Mod:encode_registers(Compact)))}
      ]}.
 
 -spec from_json(any()) -> filter().
@@ -133,45 +143,13 @@ from_json(Struct) ->
 -spec from_json(any(), module()) -> filter().
 from_json({Struct}, Mod) ->
     P = proplists:get_value(<<"p">>, Struct),
-    {_, Registers} = lists:foldl(fun (0, {I, A}) ->
-                                         {I+1, A};
-                                     (V, {I, A}) ->
-                                         {I+1, Mod:set(I, V, A)}
-                                 end,
-                                 {0, Mod:new(P)},
-                                 decode_registers(
-                                   proplists:get_value(<<"registers">>, Struct))),
+    Bytes = zlib:gunzip(
+              base64:decode(
+                proplists:get_value(<<"registers">>, Struct))),
+    Registers = Mod:decode_registers(Bytes, P),
 
     #hyper{p = P, registers = {Mod, Registers}}.
 
-
-encode_registers(M, Registers) ->
-    ByteEncoded = encode_registers(M-1, Registers, []),
-    base64:encode(
-      zlib:gzip(
-        iolist_to_binary(ByteEncoded))).
-
-encode_registers(I, _Registers, ByteEncoded) when I < 0 ->
-    ByteEncoded;
-
-encode_registers(I, {Mod, Registers}, ByteEncoded) when I >= 0 ->
-    Byte = case Mod:get(I, Registers) of
-               {ok, V} ->
-                   <<V:8/integer>>;
-               undefined ->
-                   <<0>>
-           end,
-    encode_registers(I - 1, {Mod, Registers}, [Byte | ByteEncoded]).
-
-
-decode_registers(B) ->
-    ByteEncoded = zlib:gunzip(base64:decode(B)),
-    decode_registers(ByteEncoded, []).
-
-decode_registers(<<>>, Acc) ->
-    lists:reverse(Acc);
-decode_registers(<<I:8/integer, Rest/binary>>, Acc) ->
-    decode_registers(Rest, [I | Acc]).
 
 %%
 %% HELPERS
@@ -198,27 +176,6 @@ run_of_zeroes(I, B) ->
     end.
 
 
-register_sum(I, _Mod, _Registers, Sum) when I < 0 ->
-    Sum;
-register_sum(I, Mod, Registers, Sum) when I >= 0 ->
-    Val = case Mod:get(I, Registers) of
-              {ok, R} ->
-                  pow(2, -R);
-              undefined ->
-                  pow(2, -0)
-          end,
-    register_sum(I - 1, Mod, Registers, Sum + Val).
-
-count_zeros(I, _Mod, _Registers, Count) when I < 0 ->
-    Count;
-count_zeros(I, Mod, Registers, Count) when I >= 0 ->
-    Val = case Mod:get(I, Registers) =:= undefined of
-              true  -> 1;
-              false -> 0
-          end,
-    count_zeros(I - 1, Mod, Registers, Count + Val).
-
-
 
 estimate_bias(E, P) ->
     BiasVector = list_to_tuple(hyper_const:bias_data(P)),
@@ -243,60 +200,130 @@ nearest_neighbours(E, Vector) ->
 %%
 
 
-basic_test() ->
-    ?assertEqual(1, trunc(card(insert(<<"1">>, new(4, hyper_bisect))))),
-    ?assertEqual(1, trunc(card(insert(<<"1">>, new(4, hyper_gb))))),
-    ?assertEqual(1, trunc(card(insert(<<"1">>, new(4, hyper_array))))).
+hyper_test_() ->
+    {foreach, fun () -> ok end, fun (_) -> ok end,
+     [
+      ?_test(basic_t()),
+      ?_test(serialization_t()),
+      ?_test(backend_t()),
+      ?_test(encoding_t()),
+      ?_test(register_sum_t()),
+      {timeout, 10, ?_test(error_range_t())},
+      ?_test(many_union_t()),
+      ?_test(union_t()),
+      ?_test(small_big_union_t()),
+      ?_test(intersect_card_t())
+     ]}.
+
+basic_t() ->
+    lists:foreach(fun (Mod) ->
+                     ?assertEqual(1, trunc(card(insert(<<"1">>, new(4, Mod)))))
+             end, [hyper_bisect, hyper_binary, hyper_gb, hyper_array]).
 
 
-serialization_test() ->
-    Hyper = insert_many(generate_unique(10), new(14, hyper_gb)),
+serialization_t() ->
+    Mod = hyper_binary,
+    Hyper = compact(insert_many(generate_unique(10), new(5, Mod))),
 
-    {hyper_gb, L} = Hyper#hyper.registers,
-    {hyper_gb, R} = (from_json(to_json(Hyper)))#hyper.registers,
+    {hyper_binary, L} = Hyper#hyper.registers,
+    {hyper_binary, R} = (compact(from_json(to_json(Hyper), Mod)))#hyper.registers,
 
-    ?assertEqual(trunc(card(Hyper)), trunc(card(from_json(to_json(Hyper))))),
-    ?assertEqual(Hyper#hyper.p, (from_json(to_json(Hyper)))#hyper.p),
-    ?assertEqual(gb_trees:to_list(L), gb_trees:to_list(R)).
+    ?assertEqual(trunc(card(Hyper)), trunc(card(from_json(to_json(Hyper), Mod)))),
+    ?assertEqual(Hyper#hyper.p, (from_json(to_json(Hyper), Mod))#hyper.p),
+    ?assertEqual(L, R).
 
 
-backend_test() ->
-    Values = generate_unique(1000),
+backend_t() ->
+    Values = generate_unique(15),
 
-    Gb     = insert_many(Values, new(14, hyper_gb)),
-    Array  = insert_many(Values, new(14, hyper_array)),
-    Bisect = insert_many(Values, new(14, hyper_bisect)),
+    Gb     = compact(insert_many(Values, new(7, hyper_gb))),
+    Array  = compact(insert_many(Values, new(7, hyper_array))),
+    Bisect = compact(insert_many(Values, new(7, hyper_bisect))),
+    Binary = compact(insert_many(Values, new(7, hyper_binary))),
 
     ?assertEqual(card(Gb), card(Array)),
     ?assertEqual(card(Gb), card(Bisect)),
+    ?assertEqual(card(Gb), card(Binary)),
+
+    {hyper_gb    , GbRegisters}     = Gb#hyper.registers,
+    {hyper_array , ArrayRegisters}  = Array#hyper.registers,
+    {hyper_bisect, BisectRegisters} = Bisect#hyper.registers,
+    {hyper_binary, BinaryRegisters} = Binary#hyper.registers,
+
+    %% error_logger:info_msg("Gb:     ~p~nArray:  ~p~nBisect: ~p~nBinary: ~p~n",
+    %%                       [hyper_gb:encode_registers(GbRegisters),
+    %%                        hyper_array:encode_registers(ArrayRegisters),
+    %%                        hyper_bisect:encode_registers(BisectRegisters),
+    %%                        hyper_binary:encode_registers(BinaryRegisters)]),
+
+    ?assertEqual(hyper_gb:encode_registers(GbRegisters),
+                 hyper_array:encode_registers(ArrayRegisters)),
+
+    ?assertEqual(hyper_gb:encode_registers(GbRegisters),
+                 hyper_bisect:encode_registers(BisectRegisters)),
+
+    ?assertEqual(hyper_gb:encode_registers(GbRegisters),
+                 hyper_binary:encode_registers(BinaryRegisters)),
+
+    {_, {GbSerialized, _}} = (from_json(to_json(Array), hyper_gb))#hyper.registers,
+    ?assertEqual(gb_trees:to_list(element(1, GbRegisters)),
+                 gb_trees:to_list(GbSerialized)),
+
+    ?assertEqual(card(Gb), card(from_json(to_json(Array), hyper_gb))),
+    ?assertEqual(Array, from_json(to_json(Array), hyper_array)),
+    ?assertEqual(Array, from_json(to_json(Bisect), hyper_array)),
+    ?assertEqual(Bisect, from_json(to_json(Array), hyper_bisect)),
 
     ?assertEqual(to_json(Gb), to_json(Array)),
     ?assertEqual(to_json(Gb), to_json(Bisect)),
-
-    ?assertEqual(Array, from_json(to_json(Array), hyper_array)),
-    ?assertEqual(Array, from_json(to_json(Bisect), hyper_array)),
-    ?assertEqual(Bisect, from_json(to_json(Array), hyper_bisect)).
+    ?assertEqual(to_json(Gb), to_json(Binary)).
 
 
-encoding_test() ->
-    Hyper = insert_many(generate_unique(100000), new(14)),
+
+encoding_t() ->
+    Hyper = insert_many(generate_unique(10), new(4)),
     ?assertEqual(trunc(card(Hyper)), trunc(card(from_json(to_json(Hyper))))).
 
 
-error_range_test() ->
-    Run = fun (Cardinality, P) ->
+register_sum_t() ->
+    Mods = [hyper_array, hyper_gb, hyper_bisect, hyper_binary],
+    P = 4,
+    M = trunc(math:pow(2, P)),
+
+    SetRegisters = [1, 5, 10],
+    RegisterValue = 3,
+
+    ExpectedSum =
+        (math:pow(2, -0) * M)
+        - (math:pow(2, -0) * length(SetRegisters))
+        + (math:pow(2, -RegisterValue) * length(SetRegisters)),
+
+    [begin
+         Registers = lists:foldl(fun (I, Acc) ->
+                                         Mod:set(I, RegisterValue, Acc)
+                                 end, Mod:new(P), SetRegisters),
+         ?assertEqual({Mod, ExpectedSum}, {Mod, Mod:register_sum(Registers)})
+     end || Mod <- Mods].
+
+
+error_range_t() ->
+    Mods = [hyper_gb, hyper_array, hyper_bisect, hyper_binary],
+    Run = fun (Cardinality, P, Mod) ->
                   lists:foldl(fun (V, H) ->
                                       insert(V, H)
-                              end, new(P), generate_unique(Cardinality))
+                              end, new(P, Mod), generate_unique(Cardinality))
           end,
     ExpectedError = 0.02,
     P = 14,
-    lists:foreach(fun (Card) ->
-                          Estimate = trunc(card(Run(Card, P))),
-                          ?assert(abs(Estimate - Card) < Card * ExpectedError)
-                  end, lists:seq(10000, 50000, 10000)).
+    random:seed(1, 2, 3),
 
-many_union_test() ->
+    [begin
+         Estimate = trunc(card(Run(Card, P, Mod))),
+         ?assert(abs(Estimate - Card) < Card * ExpectedError)
+     end || Card <- lists:seq(1000, 50000, 5000),
+            Mod <- Mods].
+
+many_union_t() ->
     random:seed(1, 2, 3),
     Card = 1000,
     NumSets = 3,
@@ -312,7 +339,7 @@ many_union_test() ->
 
 
 
-union_test() ->
+union_t() ->
     random:seed(1, 2, 3),
 
     LeftDistinct = sets:from_list(generate_unique(10000)),
@@ -333,7 +360,7 @@ union_test() ->
                                  sets:intersection(LeftDistinct, RightDistinct)))
             < 200).
 
-small_big_union_test() ->
+small_big_union_t() ->
     random:seed(1, 2, 3),
     SmallCard = 100,
     BigCard   = 15000, % switches to dense at 10922 items
@@ -352,7 +379,7 @@ small_big_union_test() ->
 
 
 
-intersect_card_test() ->
+intersect_card_t() ->
     random:seed(1, 2, 3),
 
     LeftDistinct = sets:from_list(generate_unique(10000)),
@@ -415,7 +442,7 @@ run_report(P, Card, Repetitions) ->
                length(Estimations))),
 
 
-    {_, Mean, _, _, Sd} = basho_stats_histogram:summary_stats(Hist),
+    {_, Mean, _, _, _} = basho_stats_histogram:summary_stats(Hist),
     P99 = basho_stats_histogram:quantile(0.99, Hist),
     P1 = basho_stats_histogram:quantile(0.01, Hist),
 
@@ -456,8 +483,8 @@ insert_many(L, Hyper) ->
 perf_report() ->
     Ps    = [15],
     Cards = [1, 100, 1000, 5000, 10000, 15000, 25000, 50000, 100000, 1000000],
-    Mods  = [hyper_gb, hyper_array, hyper_bisect],
-    Repeats = 10,
+    Mods  = [hyper_gb, hyper_array, hyper_bisect, hyper_binary],
+    Repeats = 1,
 
     random:seed(1, 2, 3),
 
@@ -471,7 +498,7 @@ perf_report() ->
                                          end),
                                  receive {Pid, ElapsedUs} -> ElapsedUs end
                          end,
-                   [Run() || _ <- lists:seq(1, Repeats)]
+                   lists:sum([Run() || _ <- lists:seq(1, Repeats)]) / Repeats
            end,
 
 
@@ -488,6 +515,9 @@ perf_report() ->
              CardUs = Time(fun card/1,
                            [insert_many(generate_unique(Card), new(P, Mod))]),
 
+             ToJsonUs = Time(fun to_json/1,
+                             [insert_many(generate_unique(Card), new(P, Mod))]),
+
 
              Filter = insert_many(generate_unique(Card), new(P, Mod)),
              {Mod, Registers} = Filter#hyper.registers,
@@ -497,44 +527,47 @@ perf_report() ->
              Bytes = bytes(Filter),
 
              {Mod, P, Card, Fill, Bytes,
-              lists:sum(InsertUs) / Card / Repeats,
-              lists:sum(UnionUs) / Repeats,
-              lists:sum(CardUs) / Repeats}
+              InsertUs / Card, UnionUs, CardUs, ToJsonUs}
 
          end || Mod  <- Mods,
                 P    <- Ps,
                 Card <- Cards],
 
-    io:format("~s ~s ~s ~s ~s ~s ~s ~s~n",
+    io:format("~s ~s ~s ~s ~s ~s ~s ~s ~s~n",
               [string:left("module"     , 12, $ ),
-               string:left("precision"  , 10, $ ),
-               string:right("card"      , 10, $ ),
-               string:right("fill"      , 10, $ ),
+               string:left("P"          ,  4, $ ),
+               string:right("card"      ,  8, $ ),
+               string:right("fill"      ,  6, $ ),
                string:right("bytes"     , 10, $ ),
                string:right("insert us" , 10, $ ),
                string:right("union ms"  , 10, $ ),
-               string:right("card ms"   , 10, $ )
+               string:right("card ms"   , 10, $ ),
+               string:right("json ms"   , 10, $ )
               ]),
 
-    lists:foreach(fun ({Mod, P, Card, Fill, Bytes, AvgInsertUs, AvgUnionUs, AvgCardUs}) ->
+    lists:foreach(fun ({Mod, P, Card, Fill, Bytes,
+                        AvgInsertUs, AvgUnionUs, AvgCardUs, AvgToJsonUs}) ->
                           M = trunc(math:pow(2, P)),
                           Filled = lists:flatten(io_lib:format("~.2f", [Fill / M])),
+
                           AvgInsertUsL = lists:flatten(
                                      io_lib:format("~.2f", [AvgInsertUs])),
-
                           UnionMs = lists:flatten(
                                       io_lib:format("~.2f", [AvgUnionUs / 1000])),
                           CardMs = lists:flatten(
                                      io_lib:format("~.2f", [AvgCardUs / 1000])),
-                          io:format("~s ~s ~s ~s ~s ~s ~s ~s~n",
+                          ToJsonMs = lists:flatten(
+                                       io_lib:format("~.2f", [AvgToJsonUs / 1000])),
+                          io:format("~s ~s ~s ~s ~s ~s ~s ~s ~s~n",
                                     [
                                      string:left(atom_to_list(Mod)      , 12, $ ),
-                                     string:left(integer_to_list(P)     , 10, $ ),
-                                     string:right(integer_to_list(Card) , 10, $ ),
-                                     string:right(Filled                , 10, $ ),
+                                     string:left(integer_to_list(P)     ,  4, $ ),
+                                     string:right(integer_to_list(Card) ,  8, $ ),
+                                     string:right(Filled                ,  6, $ ),
                                      string:right(integer_to_list(Bytes), 10, $ ),
                                      string:right(AvgInsertUsL          , 10, $ ),
                                      string:right(UnionMs               , 10, $ ),
-                                     string:right(CardMs                , 10, $ )
+                                     string:right(CardMs                , 10, $ ),
+                                     string:right(ToJsonMs              , 10, $ )
                                     ])
                   end, R).
