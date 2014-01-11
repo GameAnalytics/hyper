@@ -118,9 +118,26 @@ backend_t() ->
 
 
 encoding_t() ->
-    Hyper = hyper:insert_many(generate_unique(10), hyper:new(4)),
-    ?assertEqual(trunc(hyper:card(Hyper)),
-                 trunc(hyper:card(hyper:from_json(hyper:to_json(Hyper))))).
+    [begin
+         P = 15,
+         M = trunc(math:pow(2, P)),
+         Hyper = hyper:insert_many(generate_unique(150000), hyper:new(P, Mod)),
+         ?assertEqual(trunc(hyper:card(Hyper)),
+                      trunc(hyper:card(hyper:from_json(hyper:to_json(Hyper), Mod)))),
+
+         {Struct} = hyper:to_json(Hyper),
+         Serialized = zlib:gunzip(
+                        base64:decode(
+                          proplists:get_value(<<"registers">>, Struct))),
+
+         WithPadding =  <<Serialized/binary, 0>>,
+
+         B            = Mod:encode_registers(Mod:decode_registers(Serialized, P)),
+         BWithPadding = Mod:encode_registers(Mod:decode_registers(WithPadding, P)),
+         ?assertEqual(M, byte_size(B)),
+         ?assertEqual(M, byte_size(BWithPadding)),
+         ?assertEqual(B, BWithPadding)
+     end || Mod <- backends()].
 
 
 register_sum_t() ->
@@ -269,8 +286,7 @@ bad_serialization_t() ->
          lists:foreach(fun (I) ->
                                ?assertEqual(binary:at(Raw, I),
                                             binary:at(Encoded, I))
-                       end, lists:seq(0, size(Encoded) -1)),
-
+                       end, lists:seq(0, size(Encoded) - 1)),
 
          ?assertEqual(Raw, Mod:encode_registers(Registers)),
 

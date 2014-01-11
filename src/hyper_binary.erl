@@ -68,13 +68,22 @@ zero_count(B) ->
 encode_registers({dense, B, _, _}) ->
     B.
 
-decode_registers(Bytes, _P) ->
-    {dense, Bytes, [], 0}.
+decode_registers(Bytes, P) ->
+    M = m(P),
+    case Bytes of
+        <<B:M/binary>> ->
+            {dense, B, [], 0};
+        <<B:M/binary, 0>> ->
+            {dense, B, [], 0}
+    end.
 
 
 %%
 %% INTERNALS
 %%
+
+m(P) ->
+    trunc(math:pow(2, P)).
 
 do_merge(<<>>, <<>>) ->
     [];

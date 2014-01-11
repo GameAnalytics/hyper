@@ -134,16 +134,21 @@ encode_registers(I, B, ByteEncoded) when I >= 0 ->
 
 
 
-decode_registers(Bytes, P) ->
-    DenseSize = trunc(math:pow(2, P)),
+decode_registers(AllBytes, P) ->
+    M = DenseSize = trunc(math:pow(2, P)),
     EntrySize = (?KEY_SIZE + ?VALUE_SIZE) div 8,
     Threshold = DenseSize div EntrySize,
+
+    Bytes = case AllBytes of
+                <<B:M/binary>>    -> B;
+                <<B:M/binary, 0>> -> B
+            end,
 
     L = do_decode_registers(Bytes, 0),
     case length(L) < Threshold of
         true ->
-            B = bisect:new(?KEY_SIZE div 8, ?VALUE_SIZE div 8),
-            {sparse, bisect:from_orddict(B, L), P, Threshold};
+            New = bisect:new(?KEY_SIZE div 8, ?VALUE_SIZE div 8),
+            {sparse, bisect:from_orddict(New, L), P, Threshold};
         false ->
             {dense, Bytes}
     end.
