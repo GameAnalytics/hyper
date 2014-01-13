@@ -64,7 +64,9 @@ union(Filters) when is_list(Filters) ->
                                        {P, Mod}
                                end, Filters)) of
         [{_P, Mod}] ->
-            Registers = lists:map(fun (#hyper{registers = {_, R}}) ->
+            Registers = lists:map(fun (H) ->
+                                          Compact = compact(H),
+                                          #hyper{registers = {_, R}} = Compact,
                                           R
                                   end, Filters),
 
@@ -72,11 +74,8 @@ union(Filters) when is_list(Filters) ->
             First#hyper{registers = {Mod, Mod:max_merge(Registers)}}
     end.
 
-union(#hyper{registers = {Mod, SmallRegisters}} = Small,
-      #hyper{registers = {Mod, BigRegisters}} = Big)
-  when Small#hyper.p =:= Big#hyper.p ->
-    NewRegisters = Mod:max_merge(SmallRegisters, BigRegisters),
-    Big#hyper{registers = {Mod, NewRegisters}}.
+union(Small, Big) ->
+    union([Small, Big]).
 
 
 
@@ -283,7 +282,6 @@ perf_report() ->
     Mods  = [hyper_gb, hyper_array, hyper_bisect, hyper_binary],
     Repeats = 10,
 
-    random:seed(1, 2, 3),
 
     Time = fun (F, Args) ->
                    Run = fun () ->
@@ -300,12 +298,15 @@ perf_report() ->
 
 
     R = [begin
+             io:format("."),
+             random:seed(1, 2, 3),
+
              M = trunc(math:pow(2, P)),
              InsertUs = Time(fun (Values, H) ->
                                      insert_many(Values, H)
                              end,
                              [generate_unique(Card), new(P, Mod)]),
-             ReusableH = insert_many(generate_unique(Card), new(P, Mod)),
+             ReusableH = compact(insert_many(generate_unique(Card), new(P, Mod))),
 
              UnionUs = Time(fun union/2,
                             [insert_many(generate_unique(Card div 10), new(P, Mod)),
@@ -329,7 +330,7 @@ perf_report() ->
          end || Mod  <- Mods,
                 P    <- Ps,
                 Card <- Cards],
-
+    io:format("~n"),
     io:format("~s ~s ~s ~s ~s ~s ~s ~s ~s~n",
               [string:left("module"     , 12, $ ),
                string:left("P"          ,  4, $ ),
@@ -344,7 +345,6 @@ perf_report() ->
 
     lists:foreach(fun ({Mod, P, Card, Fill, Bytes,
                         AvgInsertUs, AvgUnionUs, AvgCardUs, AvgToJsonUs}) ->
-                          M = trunc(math:pow(2, P)),
                           Filled = lists:flatten(io_lib:format("~.2f", [Fill])),
 
                           AvgInsertUsL = lists:flatten(

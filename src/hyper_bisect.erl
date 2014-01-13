@@ -19,20 +19,18 @@ new(P) ->
     {sparse, bisect:new(?KEY_SIZE div 8, ?VALUE_SIZE div 8), P, Threshold}.
 
 
-set(Index, Value, {sparse, B, P, Threshold} = S) ->
-    case bisect:find(B, <<Index:?KEY_SIZE/integer>>) of
-        <<R:?VALUE_SIZE/integer>> when R > Value->
-            S;
-        _ ->
-            NewB = bisect:insert(B,
-                                 <<Index:?KEY_SIZE/integer>>,
-                                 <<Value:?VALUE_SIZE/integer>>),
-            case bisect:num_keys(NewB) < Threshold of
-                true ->
-                    {sparse, NewB, P, Threshold};
-                false ->
-                    {dense, bisect2dense(NewB, P)}
-            end
+set(Index, Value, {sparse, B, P, Threshold}) ->
+    V = <<Value:?VALUE_SIZE/integer>>,
+    UpdateF = fun (OldValue) when OldValue >= V -> OldValue;
+                  (OldValue) when OldValue < V -> V
+              end,
+    NewB = bisect:update(B, <<Index:?KEY_SIZE/integer>>, V, UpdateF),
+
+    case bisect:num_keys(NewB) < Threshold of
+        true ->
+            {sparse, NewB, P, Threshold};
+        false ->
+            {dense, bisect2dense(NewB, P)}
     end;
 
 set(Index, Value, {dense, B} = D) ->

@@ -157,7 +157,8 @@ register_sum_t() ->
          Registers = lists:foldl(fun (I, Acc) ->
                                          Mod:set(I, RegisterValue, Acc)
                                  end, Mod:new(P), SetRegisters),
-         ?assertEqual({Mod, ExpectedSum}, {Mod, Mod:register_sum(Registers)})
+         Compact = Mod:compact(Registers),
+         ?assertEqual({Mod, ExpectedSum}, {Mod, Mod:register_sum(Compact)})
      end || Mod <- Mods].
 
 
@@ -182,29 +183,40 @@ many_union_t() ->
     random:seed(1, 2, 3),
     Card = 1000,
     NumSets = 3,
-    Mod = hyper_bisect,
-    P = 15,
 
-    Sets = [sets:from_list(generate_unique(Card)) || _ <- lists:seq(1, NumSets)],
-    Filters = lists:map(fun (S) ->
-                                hyper:insert_many(sets:to_list(S),
-                                                  hyper:new(P, Mod))
-                        end, Sets),
+    [begin
+         M = trunc(math:pow(2, P)),
+         Error = 1.04 / math:sqrt(M),
 
-    ExpectedFilter = hyper:compact(
-                       hyper:insert_many(
-                         lists:flatten([sets:to_list(S) || S <- Sets]),
-                         hyper:new(P, Mod))),
-    H = hyper:compact(hyper:union(Filters)),
+         Sets = [sets:from_list(generate_unique(Card))
+                 || _ <- lists:seq(1, NumSets)],
+         Filters = [hyper:insert_many(sets:to_list(S), hyper:new(P, Mod))
+                    || S <- Sets],
 
-    {Mod, ExpectedRegisters} = ExpectedFilter#hyper.registers,
-    {Mod, ActualRegisters} = H#hyper.registers,
+         ExpectedFilter = hyper:compact(
+                            hyper:insert_many(
+                              lists:flatten([sets:to_list(S) || S <- Sets]),
+                              hyper:new(P, Mod))),
+         H = hyper:union(Filters),
 
-    ?assertEqual(Mod:encode_registers(ExpectedRegisters),
-                 Mod:encode_registers(ActualRegisters)),
+         {Mod, ExpectedRegisters} = ExpectedFilter#hyper.registers,
+         {Mod, ActualRegisters} = H#hyper.registers,
 
-    ?assert(abs(sets:size(sets:union(Sets)) - hyper:card(hyper:union(Filters)))
-            < (Card * NumSets) * 0.1).
+         ?assertEqual(Mod:encode_registers(ExpectedRegisters),
+                      Mod:encode_registers(ActualRegisters)),
+
+         Delta = abs(sets:size(sets:union(Sets)) - hyper:card(hyper:union(Filters))),
+         case Delta < (Card * NumSets * Error) of
+             true ->
+                 ok;
+             false ->
+                 error_logger:info_msg("too high error, expected ~.2f%, actual ~.2f%~n"
+                                       "~p, p = ~p, card = ~p",
+                                       [Error, Delta / (Card * NumSets), Mod, P, Card]),
+                 ?assert(false)
+         end
+     end || Mod <- backends(),
+            P <- [15]].
 
 
 
@@ -220,7 +232,7 @@ union_t() ->
     LeftHyper = hyper:insert_many(sets:to_list(LeftDistinct), hyper:new(13)),
     RightHyper = hyper:insert_many(sets:to_list(RightDistinct), hyper:new(13)),
 
-    UnionHyper = hyper:union(LeftHyper, RightHyper),
+    UnionHyper = hyper:union([LeftHyper, RightHyper]),
     Intersection = hyper:card(LeftHyper)
         + hyper:card(RightHyper) - hyper:card(UnionHyper),
 
@@ -370,7 +382,9 @@ prop_getset() ->
                     true ->
                         true;
                     false ->
-                        error_logger:info_msg("values~n~pencoded~n~p~nexpected~n~p~n",
+                        error_logger:info_msg("values~n~p~n"
+                                              "encoded~n~p~n"
+                                              "expected~n~p~n",
                                               [L,
                                                Mod:encode_registers(R),
                                                expected_bytes(P, Values)]),

@@ -124,7 +124,7 @@ sum_test() ->
                             math:pow(2, -0), % 12
                             math:pow(2, -0), % 13
                             math:pow(2, -0), % 14
-                            math:pow(2, -0)  % 5
+                            math:pow(2, -0)  % 15
                            ]),
                  register_sum(T)).
 

@@ -20,19 +20,12 @@ new(P) ->
 set(Index, Value, {dense, B, Tmp, TmpCount}) ->
     case binary:at(B, Index) of
         R when R < Value ->
-            case lists:keyfind(Index, 1, Tmp) of
-                {Index, TmpR} when TmpR > Value ->
-                    {dense, B, Tmp, TmpCount};
-                _ ->
-                    New = {dense, B,
-                           lists:keystore(Index, 1, Tmp, {Index, Value}),
-                           TmpCount + 1},
-                    case TmpCount < 100 of
-                        true ->
-                            New;
-                        false ->
-                            compact(New)
-                    end
+            New = {dense, B, [{Index, Value} | Tmp], TmpCount + 1},
+            case TmpCount < 100 of
+                true ->
+                    New;
+                false ->
+                    compact(New)
             end;
         _ ->
             {dense, B, Tmp, TmpCount}
@@ -40,18 +33,28 @@ set(Index, Value, {dense, B, Tmp, TmpCount}) ->
 
 
 compact({dense, B, Tmp, _TmpCount}) ->
-    {dense, merge_tmp(B, lists:sort(Tmp)), [], 0}.
+    MaxR = lists:foldl(fun ({I, V}, Acc) ->
+                               case orddict:find(I, Acc) of
+                                   {ok, R} when R >= V ->
+                                       Acc;
+                                   _ ->
+                                       orddict:store(I, V, Acc)
+                               end
+                       end, orddict:new(), Tmp),
+    NewB = merge_tmp(B, MaxR),
+    {dense, NewB, [], 0}.
 
-fold(F, Acc, {dense, B, Tmp, _}) ->
-    do_fold(F, Acc, merge_tmp(B, Tmp)).
+fold(F, Acc, {dense, B, [], _}) ->
+    do_fold(F, Acc, B).
 
 max_merge([First | Rest]) ->
     lists:foldl(fun (B, Acc) ->
                         max_merge(B, Acc)
                 end, First, Rest).
 
-max_merge({dense, Small, SmallTmp, _}, {dense, Big, BigTmp, _}) ->
-    {dense, do_merge(merge_tmp(Small, SmallTmp), merge_tmp(Big, BigTmp)), [], 0}.
+max_merge({dense, Small, [], _}, {dense, Big, [], _}) ->
+    Merged = iolist_to_binary(do_merge(Small, Big)),
+    {dense, Merged, [], 0}.
 
 bytes({dense, B, _, _}) ->
     erlang:byte_size(B).
@@ -99,6 +102,7 @@ do_fold(_, Acc, <<>>, _) ->
 do_fold(F, Acc, <<Value:?VALUE_SIZE/integer, Rest/binary>>, Index) ->
     do_fold(F, F(Index, Value, Acc), Rest, Index+1).
 
+
 merge_tmp(B, L) ->
     iolist_to_binary(
       lists:reverse(
@@ -109,6 +113,7 @@ merge_tmp(B, [], _PrevIndex, Acc) ->
 
 merge_tmp(B, [{Index, Value} | Rest], PrevIndex, Acc) ->
     I = Index - PrevIndex - 1,
+
     case B of
         <<Left:I/binary, _:?VALUE_SIZE/integer, Right/binary>> ->
             NewAcc = [<<Value:?VALUE_SIZE/integer>>, Left | Acc],
