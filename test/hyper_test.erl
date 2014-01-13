@@ -182,12 +182,26 @@ many_union_t() ->
     random:seed(1, 2, 3),
     Card = 1000,
     NumSets = 3,
+    Mod = hyper_bisect,
+    P = 15,
 
     Sets = [sets:from_list(generate_unique(Card)) || _ <- lists:seq(1, NumSets)],
     Filters = lists:map(fun (S) ->
                                 hyper:insert_many(sets:to_list(S),
-                                                  hyper:new(10, hyper_bisect))
+                                                  hyper:new(P, Mod))
                         end, Sets),
+
+    ExpectedFilter = hyper:compact(
+                       hyper:insert_many(
+                         lists:flatten([sets:to_list(S) || S <- Sets]),
+                         hyper:new(P, Mod))),
+    H = hyper:compact(hyper:union(Filters)),
+
+    {Mod, ExpectedRegisters} = ExpectedFilter#hyper.registers,
+    {Mod, ActualRegisters} = H#hyper.registers,
+
+    ?assertEqual(Mod:encode_registers(ExpectedRegisters),
+                 Mod:encode_registers(ActualRegisters)),
 
     ?assert(abs(sets:size(sets:union(Sets)) - hyper:card(hyper:union(Filters)))
             < (Card * NumSets) * 0.1).

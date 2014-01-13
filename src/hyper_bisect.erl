@@ -59,19 +59,31 @@ fold(F, Acc, {dense, B}) ->
 
 max_merge(Registers) ->
     [First | Rest] = Registers,
-    lists:foldl(fun (R, Acc) ->
-                        max_merge(R, Acc)
-                end, First, Rest).
+    lists:foldl(fun max_merge/2, First, Rest).
+
 
 
 max_merge({sparse, Small, P, T}, {sparse, Big, P, T}) ->
-    {sparse, bisect:merge(Small, Big), P, T};
+    ToInsert = bisect:foldl(Small,
+                            fun (Index, Value, Acc) ->
+                                    case bisect:find(Big, Index) of
+                                        not_found ->
+                                            [{Index, Value} | Acc];
+                                        V when V >= Value ->
+                                            Acc;
+                                        V when V < Value ->
+                                            [{Index, Value} | Acc]
+                                    end
+                            end,
+                            []),
+    Merged = bisect:bulk_insert(Big, lists:sort(ToInsert)),
+    {sparse, Merged, P, T};
 
 
 max_merge({dense, Left}, {dense, Right}) ->
-    {dense, iolist_to_binary(
-              lists:reverse(
-                do_dense_merge(Left, Right)))};
+    Merged = iolist_to_binary(
+               do_dense_merge(Left, Right)),
+    {dense, Merged};
 
 max_merge({dense, Dense}, {sparse, Sparse, P, _}) ->
     {dense, iolist_to_binary(
@@ -117,20 +129,7 @@ encode_registers({dense, B}) ->
 encode_registers({sparse, B, P, _}) ->
     M = trunc(math:pow(2, P)),
     iolist_to_binary(
-      encode_registers(M-1, B, [])).
-
-
-encode_registers(I, _B, ByteEncoded) when I < 0 ->
-    ByteEncoded;
-
-encode_registers(I, B, ByteEncoded) when I >= 0 ->
-    Byte = case bisect:find(B, <<I:?KEY_SIZE/integer>>) of
-               not_found ->
-                   <<0>>;
-               V ->
-                   V % already encoded
-           end,
-    encode_registers(I - 1, B, [Byte | ByteEncoded]).
+      do_encode_registers(M-1, B, [])).
 
 
 
@@ -153,14 +152,6 @@ decode_registers(AllBytes, P) ->
             {dense, Bytes}
     end.
 
-do_decode_registers(<<>>, _) ->
-    [];
-do_decode_registers(<<0, Rest/binary>>, I) ->
-    do_decode_registers(Rest, I+1);
-do_decode_registers(<<Value:?VALUE_SIZE, Rest/binary>>, I) ->
-    [{<<I:?KEY_SIZE/integer>>, <<Value:?VALUE_SIZE/integer>>}
-     | do_decode_registers(Rest, I+1)].
-
 
 %%
 %% INTERNAL
@@ -168,7 +159,8 @@ do_decode_registers(<<Value:?VALUE_SIZE, Rest/binary>>, I) ->
 
 do_dense_merge(<<>>, <<>>) ->
     [];
-do_dense_merge(<<Left, LeftRest/binary>>, <<Right, RightRest/binary>>) ->
+do_dense_merge(<<Left:?VALUE_SIZE/integer, LeftRest/binary>>,
+               <<Right:?VALUE_SIZE/integer, RightRest/binary>>) ->
     [max(Left, Right) | do_dense_merge(LeftRest, RightRest)].
 
 
@@ -208,6 +200,28 @@ bisect2dense(B, P) ->
     Filled = [binary:copy(<<0>>, M - LastI - 1) | L],
 
     iolist_to_binary(lists:reverse(Filled)).
+
+do_encode_registers(I, _B, ByteEncoded) when I < 0 ->
+    ByteEncoded;
+do_encode_registers(I, B, ByteEncoded) when I >= 0 ->
+    Byte = case bisect:find(B, <<I:?KEY_SIZE/integer>>) of
+               not_found ->
+                   <<0>>;
+               V ->
+                   V % already encoded
+           end,
+    do_encode_registers(I - 1, B, [Byte | ByteEncoded]).
+
+
+do_decode_registers(<<>>, _) ->
+    [];
+do_decode_registers(<<0, Rest/binary>>, I) ->
+    do_decode_registers(Rest, I+1);
+do_decode_registers(<<Value:?VALUE_SIZE, Rest/binary>>, I) ->
+    [{<<I:?KEY_SIZE/integer>>, <<Value:?VALUE_SIZE/integer>>}
+     | do_decode_registers(Rest, I+1)].
+
+
 
 %%
 %% TESTS

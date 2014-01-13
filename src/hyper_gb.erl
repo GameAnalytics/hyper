@@ -1,5 +1,5 @@
 -module(hyper_gb).
--export([new/1, set/3, fold/3, max_merge/2, bytes/1]).
+-export([new/1, set/3, max_merge/1, max_merge/2, bytes/1]).
 -export([register_sum/1, zero_count/1, encode_registers/1, decode_registers/2, compact/1]).
 -include_lib("eunit/include/eunit.hrl").
 
@@ -24,6 +24,10 @@ set(Index, Value, {T, M}) ->
             {gb_trees:enter(Index, Value, T), M}
     end.
 
+max_merge(Registers) ->
+    [First | Rest] = Registers,
+    lists:foldl(fun (R, Acc) -> max_merge(R, Acc) end,
+                First, Rest).
 
 max_merge(Small, Big) ->
     fold(fun (Index, L, Registers) ->
