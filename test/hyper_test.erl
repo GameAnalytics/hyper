@@ -9,7 +9,7 @@ hyper_test_() ->
      [
       ?_test(basic_t()),
       ?_test(serialization_t()),
-      {timeout, 30, ?_test(backend_t())},
+      {timeout, 60, ?_test(backend_t())},
       ?_test(encoding_t()),
       ?_test(register_sum_t()),
       {timeout, 30, ?_test(error_range_t())},
@@ -17,7 +17,14 @@ hyper_test_() ->
       ?_test(union_t()),
       ?_test(small_big_union_t()),
       ?_test(intersect_card_t()),
-      {timeout, 600, fun () -> [] = proper:module(?MODULE) end},
+      {timeout, 600, fun () -> ?assert(proper:quickcheck(prop_set(),
+                                                         [{max_size, 1000},
+                                                          {numtests, 1000},
+                                                          {to_file, user}])) end},
+      {timeout, 600, fun () -> ?assert(proper:quickcheck(prop_serialize(),
+                                                         [{max_size, 1000},
+                                                          {numtests, 1000},
+                                                          {to_file, user}])) end},
       ?_test(bad_serialization_t())
      ]}.
 
@@ -25,17 +32,17 @@ basic_t() ->
     [?assertEqual(1, trunc(
                        hyper:card(
                          hyper:insert(<<"1">>, hyper:new(4, Mod)))))
-     || Mod <- [hyper_bisect, hyper_binary, hyper_gb, hyper_array]].
+     || Mod <- backends()].
 
 
 serialization_t() ->
-    Mod = hyper_binary,
+    Mod = hyper_binary_rle,
     Hyper = hyper:compact(hyper:insert_many(generate_unique(10), hyper:new(5, Mod))),
 
-    {hyper_binary, L} = Hyper#hyper.registers,
-    {hyper_binary, R} = (hyper:compact(
-                           hyper:from_json(
-                             hyper:to_json(Hyper), Mod)))#hyper.registers,
+    {Mod, L} = Hyper#hyper.registers,
+    {Mod, R} = (hyper:compact(
+                  hyper:from_json(
+                    hyper:to_json(Hyper), Mod)))#hyper.registers,
 
     ?assertEqual(trunc(hyper:card(Hyper)),
                  trunc(
@@ -48,7 +55,7 @@ serialization_t() ->
 
 
 backend_t() ->
-    Values = generate_unique(1000000),
+    Values = generate_unique(10000),
     P = 9,
     M = trunc(math:pow(2, P)),
 
@@ -56,12 +63,13 @@ backend_t() ->
     Array  = hyper:compact(hyper:insert_many(Values, hyper:new(P, hyper_array))),
     Bisect = hyper:compact(hyper:insert_many(Values, hyper:new(P, hyper_bisect))),
     Binary = hyper:compact(hyper:insert_many(Values, hyper:new(P, hyper_binary))),
-
+    Rle    = hyper:compact(hyper:insert_many(Values, hyper:new(P, hyper_binary_rle))),
 
     {hyper_gb    , GbRegisters}     = Gb#hyper.registers,
     {hyper_array , ArrayRegisters}  = Array#hyper.registers,
     {hyper_bisect, BisectRegisters} = Bisect#hyper.registers,
     {hyper_binary, BinaryRegisters} = Binary#hyper.registers,
+    {hyper_binary_rle, RleRegisters} = Rle#hyper.registers,
 
     %% error_logger:info_msg("Gb:     ~p~nArray:  ~p~nBisect: ~p~nBinary: ~p~n",
     %%                       [hyper_gb:encode_registers(GbRegisters),
@@ -78,16 +86,16 @@ backend_t() ->
                                   ZeroCount = hyper:run_of_zeroes(RegisterValue)
                                       + 1,
 
-                                  case orddict:find(Index, Registers) of
+                                  case dict:find(Index, Registers) of
                                       {ok, R} when R > ZeroCount ->
                                           Registers;
                                       _ ->
-                                          orddict:store(Index, ZeroCount, Registers)
+                                          dict:store(Index, ZeroCount, Registers)
                                   end
-                          end, orddict:new(), Values),
+                          end, dict:new(), Values),
     ExpectedBytes = iolist_to_binary(
                       [begin
-                           case orddict:find(I, ExpectedRegisters) of
+                           case dict:find(I, ExpectedRegisters) of
                                {ok, V} ->
                                    <<V:8/integer>>;
                                error ->
@@ -99,20 +107,30 @@ backend_t() ->
     ?assertEqual(ExpectedBytes, hyper_array:encode_registers(ArrayRegisters)),
     ?assertEqual(ExpectedBytes, hyper_bisect:encode_registers(BisectRegisters)),
     ?assertEqual(ExpectedBytes, hyper_binary:encode_registers(BinaryRegisters)),
+    ?assertEqual(ExpectedBytes, hyper_binary_rle:encode_registers(RleRegisters)),
+
+    %% error_logger:info_msg("~p~n~p~n", [hyper:from_json(
+    %%                                      hyper:to_json(Array),
+    %%                                      hyper_binary_rle),
+    %%                                   Rle]),
 
     ?assertEqual(hyper:card(Gb),
                  hyper:card(hyper:from_json(hyper:to_json(Array), hyper_gb))),
     ?assertEqual(Array, hyper:from_json(hyper:to_json(Array), hyper_array)),
     ?assertEqual(Array, hyper:from_json(hyper:to_json(Bisect), hyper_array)),
     ?assertEqual(Bisect, hyper:from_json(hyper:to_json(Array), hyper_bisect)),
+    ?assertEqual(Rle, hyper:from_json(hyper:to_json(Array), hyper_binary_rle)),
+
 
     ?assertEqual(hyper:to_json(Gb), hyper:to_json(Array)),
     ?assertEqual(hyper:to_json(Gb), hyper:to_json(Bisect)),
     ?assertEqual(hyper:to_json(Gb), hyper:to_json(Binary)),
+    ?assertEqual(hyper:to_json(Gb), hyper:to_json(Rle)),
 
     ?assertEqual(hyper:card(Gb), hyper:card(Array)),
     ?assertEqual(hyper:card(Gb), hyper:card(Bisect)),
-    ?assertEqual(hyper:card(Gb), hyper:card(Binary)).
+    ?assertEqual(hyper:card(Gb), hyper:card(Binary)),
+    ?assertEqual(hyper:card(Gb), hyper:card(Rle)).
 
 
 
@@ -121,7 +139,7 @@ encoding_t() ->
     [begin
          P = 15,
          M = trunc(math:pow(2, P)),
-         Hyper = hyper:insert_many(generate_unique(150000), hyper:new(P, Mod)),
+         Hyper = hyper:insert_many(generate_unique(1000), hyper:new(P, Mod)),
          ?assertEqual(trunc(hyper:card(Hyper)),
                       trunc(hyper:card(hyper:from_json(hyper:to_json(Hyper), Mod)))),
 
@@ -141,7 +159,7 @@ encoding_t() ->
 
 
 register_sum_t() ->
-    Mods = [hyper_array, hyper_gb, hyper_bisect, hyper_binary],
+    Mods = backends(),
     P = 4,
     M = trunc(math:pow(2, P)),
 
@@ -181,7 +199,7 @@ error_range_t() ->
 
 many_union_t() ->
     random:seed(1, 2, 3),
-    Card = 1000,
+    Card = 100,
     NumSets = 3,
 
     [begin
@@ -215,22 +233,25 @@ many_union_t() ->
                                        [Error, Delta / (Card * NumSets), Mod, P, Card]),
                  ?assert(false)
          end
-     end || Mod <- backends(),
+     end || Mod <- [hyper_binary_rle],
             P <- [15]].
 
 
 
 union_t() ->
     random:seed(1, 2, 3),
+    Mod = hyper_binary_rle,
 
-    LeftDistinct = sets:from_list(generate_unique(10000)),
+    LeftDistinct = sets:from_list(generate_unique(100)),
 
-    RightDistinct = sets:from_list(generate_unique(5000)
+    RightDistinct = sets:from_list(generate_unique(50)
                                    ++ lists:sublist(sets:to_list(LeftDistinct),
-                                                    5000)),
+                                                    50)),
 
-    LeftHyper = hyper:insert_many(sets:to_list(LeftDistinct), hyper:new(13)),
-    RightHyper = hyper:insert_many(sets:to_list(RightDistinct), hyper:new(13)),
+    LeftHyper = hyper:insert_many(sets:to_list(LeftDistinct),
+                                  hyper:new(13, Mod)),
+    RightHyper = hyper:insert_many(sets:to_list(RightDistinct),
+                                   hyper:new(13, Mod)),
 
     UnionHyper = hyper:union([LeftHyper, RightHyper]),
     Intersection = hyper:card(LeftHyper)
@@ -326,80 +347,81 @@ bad_serialization_t() ->
 %%
 
 backends() ->
-    [hyper_gb, hyper_array, hyper_bisect, hyper_binary].
+    [hyper_gb, hyper_array, hyper_bisect, hyper_binary, hyper_binary_rle].
+
 
 gen_values() ->
-    %% ?LET(S, oneof(lists:seq(1, 100000, 10)), generate_unique(S)).
-    ?SIZED(Size, generate_unique(Size*4)).
+    ?SIZED(Size, gen_values(Size)).
 
-expected_bytes(P, Values) ->
+gen_values(0) ->
+    [<<(random:uniform(100000000000000)):64/integer>>];
+gen_values(Size) ->
+    [<<(random:uniform(100000000000000)):64/integer>> | gen_values(Size-1)].
+
+gen_getset(P) ->
+    ?SIZED(Size, gen_getset(Size, P)).
+
+gen_getset(0, _P) ->
+    [];
+gen_getset(Size, P) ->
     M = trunc(math:pow(2, P)),
-    ExpectedRegisters = lists:foldl(
-                          fun (Value, Registers) ->
-                                  Hash = crypto:hash(sha, Value),
-                                  <<Index:P, RegisterValue:P/bitstring,
-                                    _/bitstring>> = Hash,
-                                  ZeroCount = hyper:run_of_zeroes(RegisterValue)
-                                      + 1,
-
-                                  case orddict:find(Index, Registers) of
-                                      {ok, R} when R > ZeroCount ->
-                                          Registers;
-                                      _ ->
-                                          orddict:store(Index, ZeroCount, Registers)
-                                  end
-                          end, orddict:new(), Values),
-    iolist_to_binary(
-      [begin
-           case orddict:find(I, ExpectedRegisters) of
-               {ok, V} ->
-                   <<V:8/integer>>;
-               error ->
-                   <<0>>
-           end
-       end || I <- lists:seq(0, M-1)]).
+    ?LET({I, V}, {choose(0, M-1), choose(1, 6)},
+         [{I, V} | gen_getset(Size-1, P)]).
 
 
-prop_getset() ->
-    ?FORALL({Mod, P, Values}, {oneof(backends()), range(4, 16), gen_values()},
-            begin
-                L = lists:map(
-                      fun (Value) ->
-                              Hash = crypto:hash(sha, Value),
-                              <<Index:P, RegisterValue:P/bitstring,
-                                _/bitstring>> = Hash,
-                              ZeroCount = hyper:run_of_zeroes(RegisterValue)
-                                  + 1,
-                              {Index, ZeroCount}
-                      end, Values),
+prop_set() ->
+    ?FORALL(
+       {Mod, P}, {oneof(backends()), choose(4, 16)},
+       ?FORALL(
+          Values, gen_getset(P),
+          begin
+              R = lists:foldl(
+                    fun ({Index, ZeroCount}, Register) ->
+                            Mod:set(Index, ZeroCount, Register)
+                    end, Mod:new(P), Values),
+              Max = lists:foldl(fun ({I, V}, Acc) ->
+                                        case dict:find(I, Acc) of
+                                            {ok, OtherV} when OtherV >= V ->
+                                                Acc;
+                                            _ ->
+                                                dict:store(I, V, Acc)
+                                        end
+                                end, dict:new(), Values),
+              Expected = lists:map(fun (I) ->
+                                           case dict:find(I, Max) of
+                                               {ok, V} ->
+                                                   <<V:8/integer>>;
+                                               error ->
+                                                   <<0>>
+                                           end
+                                   end, lists:seq(0, trunc(math:pow(2, P)) - 1)),
 
-                R = lists:foldl(
-                      fun ({Index, ZeroCount}, Register) ->
-                              Mod:set(Index, ZeroCount, Register)
-                      end, Mod:new(P), L),
-                case Mod:encode_registers(Mod:compact(R))
-                    =:= expected_bytes(P, Values) of
-                    true ->
-                        true;
-                    false ->
-                        error_logger:info_msg("values~n~p~n"
-                                              "encoded~n~p~n"
-                                              "expected~n~p~n",
-                                              [L,
-                                               Mod:encode_registers(R),
-                                               expected_bytes(P, Values)]),
+              case Mod:encode_registers(Mod:compact(R))
+                  =:= iolist_to_binary(Expected) of
+                  true ->
+                      true;
+                  false ->
+                      %% error_logger:info_msg("values~n~p~n"
+                      %%                       "encoded~n~p~n"
+                      %%                       "expected~n~p~n",
+                      %%                       [Values,
+                      %%                        Mod:encode_registers(R),
+                      %%                        iolist_to_binary(Expected)]),
                         false
-                end
-            end).
+              end
+          end)).
 
 prop_serialize() ->
-    ?FORALL({Mod, P, Values}, {oneof(backends()), range(4, 16), gen_values()},
-            begin
-                H = hyper:compact(hyper:insert_many(Values, hyper:new(P, Mod))),
-                H =:= hyper:compact(
-                        hyper:from_json(
-                          hyper:to_json(H), Mod))
-            end).
+    ?FORALL(
+       {Mod, P}, {oneof(backends()), choose(4, 16)},
+       ?FORALL(
+          Values, gen_values(),
+          begin
+              H = hyper:compact(hyper:insert_many(Values, hyper:new(P, Mod))),
+              H =:= hyper:compact(
+                      hyper:from_json(
+                        hyper:to_json(H), Mod))
+          end)).
 
 %%
 %% HELPERS

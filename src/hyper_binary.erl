@@ -11,7 +11,6 @@
 -define(VALUE_SIZE, 8).
 -define(MARKER, "rle").
 
-%% TODO: rle
 
 new(P) ->
     M = trunc(math:pow(2, P)),
