@@ -1,32 +1,82 @@
 # HyperLogLog for Erlang
 
 `hyper` is an implementation of the HyperLogLog algorithm with bias
-correction from HLL++ as (described by
-Google)[http://static.googleusercontent.com/external_content/untrusted_dlcp/research.google.com/en//pubs/archive/40671.pdf].
+correction from HLL++ as the described in the excellent
+[paper by Google][]. Using HyperLogLog you can estimate the
+cardinality of large data sets or streams using very little
+memory. The relative error is 1.04 * sqrt(2^P). When creating a new
+instance of `hyper`, you provide must provide P, allowing you to trade
+memory for accuracy. The union of two filters is lossless.
 
-Using `hyper` you can estimate the cardinality of large data sets
-using constant memory. The union of two HLL filters is lossless, which
-allows perfect parallellization.
+In practice this allows you to build efficient analytics systems. For
+example, you can create a new filter in each mapper and feed it a
+portion of your dataset while the reducers simply union together all
+filters they receive. The filter you end up with is exactly the same
+filter as if you would sequentially insert all data into a single
+filter.
+
 
 ## Usage
 
 ```erlang
 1> hyper:insert(<<"foobar">>, hyper:insert(<<"quux">>, hyper:new(4))).
-{hyper,4,{hyper_gb,{2,{10,1,{8,1,nil,nil},nil}}}}
+{hyper,4,
+       {hyper_binary,{dense,<<0,0,0,0,0,0,0,0,64,0,0,0>>,
+                            [{8,1}],
+                            1,16}}}
+
 2> hyper:card(v(-1)).
 2.136502281992361
 ```
 
 The error from estimations can be seen in this example:
 ```erlang
-10> Run = fun (P, Card) -> hyper:card(lists:foldl(fun (_, H) -> hyper:insert(crypto:rand_bytes(32), H) end, hyper:new(P), lists:seq(1, Card))) end.
+3> random:seed(1,2,3).
+undefined
+4> Run = fun (P, Card) -> hyper:card(lists:foldl(fun (_, H) -> Int = random:uniform(10000000000000), hyper:insert(<<Int:64/integer>>, H) end, hyper:new(P), lists:seq(1, Card))) end.
 #Fun<erl_eval.12.80484245>
-11> Run(12, 10000).
-9984.777312630407
-12> Run(14, 10000).
-9994.719695068114
-13> Run(16, 10000).
-9991.34646427657
+5> Run(12, 10000).
+9992.846462080579
+6> Run(14, 10000).
+10055.568563614219
+7> Run(16, 10000).
+10007.654167606248
 ```
 
-## Report
+## Is it any good?
+
+Yes.
+
+## Backends
+
+Effort has been spent on implementing different backends in the
+pursuit of finding the right trade-off. A simple performance
+comparison can be seen by running `make perf_report`. Fill rate refers
+to how many registers has a value other than 0.
+
+ * hyper_binary: Fixed memory usage (6 bits * 2^P), fastest on insert,
+   union, cardinality and serialization. Best default choice.
+
+ * hyper_bisect: Lower memory usage at lower fill rates (3 bytes per
+   used entry), slightly slower than hyper_binary for
+   everything. Switches to a structure similar to hyper_binary when it
+   would save memory. Room for further optimization.
+
+ * hyper_gb: Fast inserts, very fast unions and reasonable memory
+   usage at low fill rates. Unreasonable memory usage at high fill
+   rates.
+
+ * hyper_array: Cardinality estimation is constant, but slower than
+   hyper_gb for low fill rates. Uses much more memory at lower fill
+   rates, but stays constant from 25% and upwards.
+
+ * hyper_binary_rle: Dud
+
+You can also implement your own backend. In `hyper_test` theres a
+bunch of tests run for all backends, including some PropEr tests. The
+test suite will ensure your backend gives correct estimates and
+correctly encodes/decodes the serialized filters.
+
+
+
+[paper by Google]: http://static.googleusercontent.com/external_content/untrusted_dlcp/research.google.com/en//pubs/archive/40671.pdf
