@@ -89,16 +89,18 @@ max_merge(#dense{b = SmallB, buf = []}, #dense{b = BigB, buf = []} = Big) ->
     Merged = do_merge(SmallB, BigB, <<>>),
     Big#dense{b = Merged};
 
-max_merge(#buffer{buf = Buf}, #dense{b = B} = Dense) ->
-    Merged = merge_buf(B, max_registers(Buf)),
-    Dense#dense{b = Merged};
+max_merge(#buffer{buf = Buf}, #dense{buf = DenseBuf} = Dense) ->
+    Merged = max_registers(DenseBuf ++ Buf),
+    Dense#dense{buf = Merged,
+                buf_size = length(Merged)};
 
-max_merge(#dense{b = B} = Dense, #buffer{buf = Buf}) ->
-    Merged = merge_buf(B, max_registers(Buf)),
-    Dense#dense{b = Merged};
+max_merge(#dense{} = Dense, #buffer{} = Buffer) ->
+    max_merge(Buffer, Dense);
 
 max_merge(#buffer{buf = LeftBuf}, #buffer{buf = RightBuf} = Right) ->
-    Right#buffer{buf = max_registers(LeftBuf ++ RightBuf)}.
+    Merged = max_registers(LeftBuf ++ RightBuf),
+    Right#buffer{buf = Merged,
+                 buf_size = length(Merged)}.
 
 
 
