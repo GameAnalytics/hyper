@@ -1,83 +1,148 @@
+%% @doc: Registers stored in one large binary
+%%
+%% This backend uses one plain Erlang binary to store registers. The
+%% cost of rebuilding the binary is amortized by keeping a buffer of
+%% inserts to perform in the future.
+
 -module(hyper_binary).
 -include_lib("eunit/include/eunit.hrl").
-
--export([new/1, set/3, fold/3, compact/1, max_merge/1, max_merge/2, bytes/1]).
--export([register_sum/1, zero_count/1, encode_registers/1, decode_registers/2]).
-
 -behaviour(hyper_register).
+-compile(native).
 
--define(KEY_SIZE, 16).
--define(REPEAT_SIZE, 16).
--define(VALUE_SIZE, 8).
--define(MARKER, "rle").
+-export([new/1,
+         set/3,
+         compact/1,
+         max_merge/1,
+         max_merge/2,
+         bytes/1,
+         register_sum/1,
+         zero_count/1,
+         encode_registers/1,
+         decode_registers/2]).
+
+
+-define(VALUE_SIZE, 6).
+-define(MERGE_THRESHOLD, 0.05).
+
+-record(buffer, {buf, buf_size, p, convert_threshold}).
+-record(dense, {b, buf, buf_size, merge_threshold}).
 
 
 new(P) ->
-    M = trunc(math:pow(2, P)),
-    {dense, binary:copy(<<0>>, M), [], 0}.
+    new_buffer(P).
 
-set(Index, Value, {dense, B, Tmp, TmpCount}) ->
-    case binary:at(B, Index) of
-        R when R < Value ->
-            New = {dense, B, [{Index, Value} | Tmp], TmpCount + 1},
-            case TmpCount < 100 of
+new_buffer(P) ->
+    M = m(P),
+    ConvertThreshold = M div (5 * 8), % 5 words for each entry
+    #buffer{buf = [], buf_size = 0, p = P, convert_threshold = ConvertThreshold}.
+
+new_dense(P) ->
+    M = m(P),
+    T = max(trunc(M * ?MERGE_THRESHOLD), 16),
+    #dense{b = empty_binary(M), buf = [], buf_size = 0, merge_threshold = T}.
+
+
+set(Index, Value, #buffer{buf = Buf, buf_size = BufSize} = Buffer) ->
+    NewBuffer = Buffer#buffer{buf = [{Index, Value} | Buf],
+                              buf_size = BufSize + 1},
+    case NewBuffer#buffer.buf_size < NewBuffer#buffer.convert_threshold of
+        true ->
+            NewBuffer;
+        false ->
+            buffer2dense(NewBuffer)
+    end;
+
+set(Index, Value, #dense{buf = Buf, buf_size = BufSize} = Dense) ->
+    LeftOffset = Index * ?VALUE_SIZE,
+    <<_:LeftOffset/bitstring, R:?VALUE_SIZE/integer, _/bitstring>> = Dense#dense.b,
+
+    if
+        R < Value ->
+            New = Dense#dense{buf = [{Index, Value} | Buf],
+                              buf_size = BufSize + 1},
+            case New#dense.buf_size < Dense#dense.merge_threshold of
                 true ->
                     New;
                 false ->
                     compact(New)
             end;
-        _ ->
-            {dense, B, Tmp, TmpCount}
+        true ->
+            Dense
     end.
 
 
-compact({dense, B, Tmp, _TmpCount}) ->
-    MaxR = lists:foldl(fun ({I, V}, Acc) ->
-                               case orddict:find(I, Acc) of
-                                   {ok, R} when R >= V ->
-                                       Acc;
-                                   _ ->
-                                       orddict:store(I, V, Acc)
-                               end
-                       end, orddict:new(), Tmp),
-    NewB = merge_tmp(B, MaxR),
-    {dense, NewB, [], 0}.
+compact(#buffer{} = Buffer) ->
+    Buffer;
 
-fold(F, Acc, {dense, B, [], _}) ->
-    do_fold(F, Acc, B).
+compact(#dense{b = B, buf = Buf} = Dense) ->
+    NewB = merge_buf(B, max_registers(Buf)),
+    Dense#dense{b = NewB, buf = [], buf_size = 0}.
+
+
 
 max_merge([First | Rest]) ->
     lists:foldl(fun (B, Acc) ->
                         max_merge(B, Acc)
                 end, First, Rest).
 
-max_merge({dense, Small, [], _}, {dense, Big, [], _}) ->
-    Merged = iolist_to_binary(do_merge(Small, Big)),
-    {dense, Merged, [], 0}.
+max_merge(#dense{b = SmallB, buf = []}, #dense{b = BigB, buf = []} = Big) ->
+    Merged = do_merge(SmallB, BigB, <<>>),
+    Big#dense{b = Merged};
 
-bytes({dense, B, _, _}) ->
-    erlang:byte_size(B).
+max_merge(#buffer{buf = Buf}, #dense{b = B} = Dense) ->
+    Merged = merge_buf(B, max_registers(Buf)),
+    Dense#dense{b = Merged};
+
+max_merge(#dense{b = B} = Dense, #buffer{buf = Buf}) ->
+    Merged = merge_buf(B, max_registers(Buf)),
+    Dense#dense{b = Merged};
+
+max_merge(#buffer{buf = LeftBuf}, #buffer{buf = RightBuf} = Right) ->
+    Right#buffer{buf = max_registers(LeftBuf ++ RightBuf)}.
+
+
 
 
 register_sum(B) ->
-    fold(fun (_, V, Acc) -> Acc + math:pow(2, -V) end, 0, B).
+    fold(fun (_, 0, Acc) -> Acc + 1.0;
+             (_, 1, Acc) -> Acc + 0.5;
+             (_, 2, Acc) -> Acc + 0.25;
+             (_, 3, Acc) -> Acc + 0.125;
+             (_, 4, Acc) -> Acc + 0.0625;
+             (_, 5, Acc) -> Acc + 0.03125;
+             (_, 6, Acc) -> Acc + 0.015625;
+             (_, 7, Acc) -> Acc + 0.0078125;
+             (_, 8, Acc) -> Acc + 0.00390625;
+             (_, 9, Acc) -> Acc + 0.001953125;
+             (_, V, Acc) -> Acc + math:pow(2, -V) end,
+         0, B).
 
 zero_count(B) ->
     fold(fun (_, 0, Acc) -> Acc + 1;
              (_, _, Acc) -> Acc
          end, 0, B).
 
-encode_registers({dense, B, _, _}) ->
-    B.
+encode_registers(#buffer{} = Buffer) ->
+    encode_registers(buffer2dense(Buffer));
 
-decode_registers(Bytes, P) ->
+encode_registers(#dense{b = B}) ->
+    << <<I:8/integer>> || <<I:?VALUE_SIZE/integer>> <= B >>.
+
+decode_registers(AllBytes, P) ->
     M = m(P),
-    case Bytes of
-        <<B:M/binary>> ->
-            {dense, B, [], 0};
-        <<B:M/binary, 0>> ->
-            {dense, B, [], 0}
-    end.
+    Bytes = case AllBytes of
+                <<B:M/binary>>    -> B;
+                <<B:M/binary, 0>> -> B
+            end,
+    Dense = new_dense(P),
+    Dense#dense{b = << <<I:?VALUE_SIZE/integer>> || <<I:8>> <= Bytes >>}.
+
+
+bytes(#dense{b = B}) ->
+    erlang:byte_size(B);
+bytes(#buffer{} = Buffer) ->
+    erts_debug:flat_size(Buffer) * 8.
+
 
 
 %%
@@ -87,44 +152,71 @@ decode_registers(Bytes, P) ->
 m(P) ->
     trunc(math:pow(2, P)).
 
-do_merge(<<>>, <<>>) ->
-    [];
-do_merge(<<Left:?VALUE_SIZE, SmallRest/binary>>,
-         <<Right:?VALUE_SIZE, BigRest/binary>>) ->
-    [max(Left, Right) | do_merge(SmallRest, BigRest)].
+empty_binary(M) ->
+    list_to_bitstring([<<0:?VALUE_SIZE/integer>> || _ <-  lists:seq(0, M-1)]).
 
-do_fold(F, Acc, B) ->
+max_registers(Tmp) ->
+    lists:foldl(fun ({I, V}, Acc) ->
+                          case orddict:find(I, Acc) of
+                              {ok, R} when R >= V ->
+                                  Acc;
+                              _ ->
+                                  orddict:store(I, V, Acc)
+                          end
+                  end, orddict:new(), lists:reverse(lists:sort(Tmp))).
+
+
+buffer2dense(#buffer{buf = Buf, p = P}) ->
+    Dense = new_dense(P),
+    Merged = merge_buf(Dense#dense.b, max_registers(Buf)),
+    Dense#dense{b = Merged}.
+
+
+do_merge(<<>>, <<>>, Acc) ->
+    Acc;
+do_merge(<<Left:?VALUE_SIZE/integer, SmallRest/bitstring>>,
+         <<Right:?VALUE_SIZE/integer, BigRest/bitstring>>,
+         Acc) ->
+    do_merge(SmallRest, BigRest, <<Acc/bits, (max(Left, Right)):?VALUE_SIZE>>).
+
+
+fold(F, Acc, #buffer{} = Buffer) ->
+    fold(F, Acc, buffer2dense(Buffer));
+
+fold(F, Acc, #dense{b = B, buf = []}) ->
     do_fold(F, Acc, B, 0).
 
 do_fold(_, Acc, <<>>, _) ->
     Acc;
-do_fold(F, Acc, <<Value:?VALUE_SIZE/integer, Rest/binary>>, Index) ->
+do_fold(F, Acc, <<Value:?VALUE_SIZE/integer, Rest/bitstring>>, Index) ->
     do_fold(F, F(Index, Value, Acc), Rest, Index+1).
 
 
-merge_tmp(B, L) ->
-    iolist_to_binary(
-      lists:reverse(
-        merge_tmp(B, lists:sort(L), -1, []))).
+merge_buf(B, L) ->
+    merge_buf(B, L, -1, <<>>).
 
-merge_tmp(B, [], _PrevIndex, Acc) ->
-    [B | Acc];
+merge_buf(B, [], _PrevIndex, Acc) ->
+    <<Acc/bitstring, B/bitstring>>;
 
-merge_tmp(B, [{Index, Value} | Rest], PrevIndex, Acc) ->
-    I = Index - PrevIndex - 1,
-
+merge_buf(B, [{Index, Value} | Rest], PrevIndex, Acc) ->
+    I = (Index - PrevIndex - 1) * ?VALUE_SIZE,
     case B of
-        <<Left:I/binary, _:?VALUE_SIZE/integer, Right/binary>> ->
-            NewAcc = [<<Value:?VALUE_SIZE/integer>>, Left | Acc],
-            %% error_logger:info_msg("B: ~p~nindex: ~p, previndex: ~p, i: ~p~n"
-            %%                       "left: ~p~nright: ~p, right size: ~p~n"
-            %%                       "new acc: ~p~n",
-            %%                       [B, Index, PrevIndex, I, Left, Right,
-            %%                        byte_size(Right),
-            %%                        iolist_to_binary(lists:reverse(NewAcc))]),
-            merge_tmp(Right, Rest, Index, NewAcc);
-        <<Left:I/binary>> ->
-            [<<Value:?VALUE_SIZE/integer>>, Left | Acc]
+        <<Left:I/bitstring, OldValue:?VALUE_SIZE/integer, Right/bitstring>> ->
+            case OldValue < Value of
+                true ->
+                    NewAcc = <<Acc/bitstring,
+                               Left/bitstring,
+                               Value:?VALUE_SIZE/integer>>,
+                    merge_buf(Right, Rest, Index, NewAcc);
+                false ->
+                    NewAcc = <<Acc/bitstring,
+                               Left/bitstring,
+                               OldValue:?VALUE_SIZE/integer>>,
+                    merge_buf(Right, Rest, Index, NewAcc)
+            end;
+
+        <<Left:I/bitstring>> ->
+            <<Acc/bitstring, Left/bitstring, Value:?VALUE_SIZE/integer>>
     end.
 
 
@@ -134,6 +226,7 @@ merge_tmp(B, [{Index, Value} | Rest], PrevIndex, Acc) ->
 
 
 merge_test() ->
+    P = 4, M = m(P),
     Tmp1 = [{1, 1},
             {3, 3},
             {9, 3},
@@ -142,19 +235,33 @@ merge_test() ->
             {9, 2},
             {10, 5}],
 
-    {dense, NewB, [], 0} = new(4),
-    {dense, Compact, [], 0} = compact({dense, NewB, Tmp1, length(Tmp1)}),
-    {dense, Compact2, [], 0} = compact({dense, Compact, Tmp2, length(Tmp2)}),
+    {buffer, [], 0, T, _} = new(P),
 
-    ?assertEqual(<<0, 1, 0, 5,
-                   0, 0, 0, 0,
-                   0, 2, 5, 0,
-                   0, 0, 0, 15>>, Compact2).
+    {dense, Compact, [], 0, _} =
+        compact({dense, empty_binary(M), Tmp1, length(Tmp1), T}),
+
+    {dense, Compact2, [], 0, _} =
+        compact({dense, Compact, Tmp2, length(Tmp2), T}),
+
+    Expected = [0, 1, 0, 5,
+                0, 0, 0, 0,
+                0, 3, 5, 0,
+                0, 0, 0, 15],
+    Ints = [I || <<I:?VALUE_SIZE/integer>> <= Compact2],
+
+    ?assertEqual(Expected, Ints).
+
 
 
 serialize_test() ->
     H = compact(lists:foldl(fun (I, Acc) -> set(I, I, Acc) end,
                             new(4), lists:seq(0, 15))),
-    {dense, B, _, _} = H,
-    ?assertEqual(B, encode_registers(H)),
+
+    ?assertEqual(<<0,1,2,3,
+                   4,5,6,7,
+                   8,9,10,11,
+                   12,13,14,15>>, encode_registers(H)),
     ?assertEqual(H, decode_registers(encode_registers(H), 4)).
+
+max_registers_test() ->
+    ?assertEqual([{3, 3}], max_registers([{3, 1}, {3, 2}, {3, 3}])).
