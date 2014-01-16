@@ -164,7 +164,6 @@ rle_insert(B, I, Index, Value) ->
         %% value. Split the chunk into three new chunks.
         ChunkStart =< Index andalso Index =< ChunkEnd andalso
         RepeatValue =/= Value ->
-            ChunkSize = ChunkEnd + 1 - ChunkStart,
             LeftFill = Index - ChunkStart,
             RightFill = ChunkEnd - Index,
             %% error_logger:info_msg("splitting chunk~n"),

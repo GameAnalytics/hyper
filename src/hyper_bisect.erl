@@ -1,9 +1,18 @@
 -module(hyper_bisect).
 -include_lib("eunit/include/eunit.hrl").
-
--export([new/1, set/3, fold/3, max_merge/1, max_merge/2, bytes/1]).
--export([register_sum/1, zero_count/1, encode_registers/1, decode_registers/2, compact/1]).
 -behaviour(hyper_register).
+
+-export([new/1,
+         set/3,
+         max_merge/1,
+         max_merge/2,
+         bytes/1,
+         register_sum/1,
+         zero_count/1,
+         encode_registers/1,
+         decode_registers/2,
+         compact/1]).
+
 
 -define(KEY_SIZE, 16).
 -define(VALUE_SIZE, 8).
@@ -162,12 +171,6 @@ do_dense_merge(<<Left:?VALUE_SIZE/integer, LeftRest/binary>>,
     [max(Left, Right) | do_dense_merge(LeftRest, RightRest)].
 
 
-do_dense_sparse_merge({dense, Dense}, Bisect) ->
-    bisect:foldl(Bisect, fun (<<Index:?KEY_SIZE/integer>>,
-                              <<Value:?VALUE_SIZE/integer>>,
-                              {dense, D}) ->
-                                 set(Index, Value, {dense, D})
-                         end, {dense, Dense}).
 
 do_dense_fold(F, Acc, B) ->
     do_dense_fold(F, Acc, B, 0).
