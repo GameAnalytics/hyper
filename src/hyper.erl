@@ -22,7 +22,7 @@
 -export_type([filter/0, precision/0, registers/0]).
 
 %% Exported for testing
--export([run_of_zeroes/1, perf_report/0]).
+-export([run_of_zeroes/1, perf_report/0, estimate_report/0]).
 
 %%
 %% API
@@ -197,22 +197,41 @@ nearest_neighbours(E, Vector) ->
 
 
 
+
 %%
-%% TESTS
+%% REPORTS
 %%
 
-%% report_wrapper_test_() ->
-%%     [{timeout, 600000000, ?_test(estimate_report())}].
+
+generate_unique(N) ->
+    generate_unique(lists:usort(random_bytes(N)), N).
+
+generate_unique(L, N) ->
+    case length(L) of
+        N ->
+            L;
+        Less ->
+            generate_unique(lists:usort(random_bytes(N - Less) ++ L), N)
+    end.
+
+
+random_bytes(N) ->
+    random_bytes([], N).
+
+random_bytes(Acc, 0) -> Acc;
+random_bytes(Acc, N) ->
+    Int = random:uniform(100000000000000),
+    random_bytes([<<Int:64/integer>> | Acc], N-1).
+
+
+
+
 
 estimate_report() ->
     random:seed(erlang:now()),
-    Ps = lists:seq(10, 16, 1),
+    Ps            = lists:seq(10, 16),
     Cardinalities = [100, 1000, 10000, 100000, 1000000],
-    Repetitions = 50,
-
-    %% Ps = [4, 5],
-    %% Cardinalities = [100],
-    %% Repetitions = 100,
+    Repetitions   = 50,
 
     Stats = [run_report(P, Card, Repetitions) || P <- Ps,
                                                  Card <- Cardinalities],
@@ -249,41 +268,12 @@ run_report(P, Card, Repetitions) ->
     {P, Card, Mean, P99, P1, trunc(pow(2, P))}.
 
 
-
-
-generate_unique(N) ->
-    generate_unique(lists:usort(random_bytes(N)), N).
-
-
-generate_unique(L, N) ->
-    case length(L) of
-        N ->
-            L;
-        Less ->
-            generate_unique(lists:usort(random_bytes(N - Less) ++ L), N)
-    end.
-
-
-random_bytes(N) ->
-    random_bytes([], N).
-
-random_bytes(Acc, 0) -> Acc;
-random_bytes(Acc, N) ->
-    Int = random:uniform(100000000000000),
-    random_bytes([<<Int:64/integer>> | Acc], N-1).
-
-
-
-%%
-%% REPORTS
-%%
-
 perf_report() ->
-    Ps    = [15],
-    Cards = [1, 100, 1000, 5000, 10000, 15000, 25000, 50000, 100000, 1000000],
-    Mods  = [hyper_gb, hyper_array, hyper_bisect, hyper_binary],
+    Ps      = [15],
+    Cards   = [1, 100, 1000, 2500, 5000, 10000,
+               15000, 25000, 50000, 100000, 1000000],
+    Mods    = [hyper_gb, hyper_array, hyper_bisect, hyper_binary],
     Repeats = 10,
-
 
     Time = fun (F, Args) ->
                    Run = fun () ->
