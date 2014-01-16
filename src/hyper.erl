@@ -178,8 +178,10 @@ run_of_zeroes(I, B) ->
 
 
 estimate_bias(E, P) ->
-    BiasVector = list_to_tuple(hyper_const:bias_data(P)),
-    NearestNeighbours = nearest_neighbours(E, list_to_tuple(hyper_const:estimate_data(P))),
+    BiasVector = hyper_const:bias_data(P),
+    EstimateVector = hyper_const:estimate_data(P),
+    NearestNeighbours = nearest_neighbours(E, EstimateVector),
+
     lists:sum([element(Index, BiasVector) || Index <- NearestNeighbours])
         / length(NearestNeighbours).
 
