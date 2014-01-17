@@ -7,7 +7,7 @@
 -module(hyper_binary).
 -include_lib("eunit/include/eunit.hrl").
 -behaviour(hyper_register).
--compile(native).
+%%-compile(native).
 
 -export([new/1,
          set/3,
