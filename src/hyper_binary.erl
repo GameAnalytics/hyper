@@ -98,10 +98,17 @@ max_merge(#buffer{buf = Buf}, #dense{buf = DenseBuf} = Dense) ->
 max_merge(#dense{} = Dense, #buffer{} = Buffer) ->
     max_merge(Buffer, Dense);
 
-max_merge(#buffer{buf = LeftBuf}, #buffer{buf = RightBuf} = Right) ->
-    Merged = max_registers(LeftBuf ++ RightBuf),
-    Right#buffer{buf = Merged,
-                 buf_size = length(Merged)}.
+max_merge(#buffer{buf = LeftBuf, buf_size = LeftBufSize},
+          #buffer{buf = RightBuf, buf_size = RightBufSize} = Right) ->
+    case LeftBufSize + RightBufSize < Right#buffer.convert_threshold of
+        true ->
+            Right#buffer{buf = LeftBuf ++ RightBuf,
+                         buf_size = LeftBufSize + RightBufSize};
+        false ->
+            Merged = max_registers(LeftBuf ++ RightBuf),
+            Right#buffer{buf = Merged,
+                         buf_size = length(Merged)}
+    end.
 
 
 
