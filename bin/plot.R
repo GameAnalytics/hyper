@@ -3,20 +3,22 @@
 require("ggplot2")
 require("scales")
 
-stats = read.csv("data.csv")
+stats = read.csv("estimates.csv")
 
 
 p_labeller <- function (var, value) {
-  memory <- (2^value) / 1024
-  return (paste("p=", value, " (", memory, "k)", sep = ""))
+  return (paste("p=", value))
 }
 
+p <- ggplot(data = stats, aes(x = card, y = median)) +
+  geom_point(aes(colour = factor(p))) +
+  geom_errorbar(aes(ymax = p95, ymin = p05, colour = factor(p)), alpha = 0.8, size=0.2) +
+  scale_x_log10(breaks = unique(stats$card), labels = comma) +
+  ##scale_x_continuous(breaks = seq(0, max(stats$card), by = 5000), labels = comma) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ##scale_y_continuous(breaks = c(0:100 / 1000), labels = percent) +
+  scale_y_continuous(labels = percent) +
+  facet_grid(. ~ p)
 
-p <- ggplot(data = stats, aes(x = card, y = mean / card)) +
-  geom_text(aes(label = paste(round((mean / card) * 100, 2), "%")), size = 2, angle = 45) +
-  scale_x_log10(breaks = c(100, 1000, 10000, 100000, 1000000), labels = comma) +
-  scale_y_continuous(breaks = c(0:100 / 100), labels = percent) +
-  facet_grid(. ~ p, labeller = p_labeller) +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))
 
-ggsave(file = "hyper.pdf", width = 10, height = 6)
+ggsave(file = "hyper.png", width = 10, height = 6)

@@ -2,3 +2,6 @@
 deps
 ebin
 *~
+hyper.png
+estimates.csv
+erl_crash.dump

@@ -225,34 +225,49 @@ random_bytes(Acc, N) ->
 
 
 
+%% Lifted from berk, https://github.com/richcarl/berk/blob/master/berk.erl
+median(Ns) ->
+    N = length(Ns),
+    Ss = lists:sort(Ns),
+    if (N rem 2) > 0 ->
+            lists:nth(1+trunc(N/2), Ss);
+       true ->
+            [X1,X2] = lists:sublist(Ss, trunc(N/2),2),
+            (X1+X2)/2
+    end.
 
 
 estimate_report() ->
-    random:seed(erlang:now()),
-    Ps            = lists:seq(10, 16),
-    Cardinalities = [100, 1000, 10000, 100000, 1000000],
+    Ps            = lists:seq(11, 16),
+    Cardinalities = [100, 1000, 10000, 100000, 1000000, 10000000],
     Repetitions   = 50,
 
-    Stats = [run_report(P, Card, Repetitions) || P <- Ps,
-                                                 Card <- Cardinalities],
-    error_logger:info_msg("~p~n", [Stats]),
+    {ok, F} = file:open("estimates.csv", [write]),
 
-    Result =
-        "p,card,mean,p99,p1,bytes~n" ++
-        lists:map(fun ({P, Card, Mean, P99, P1, Bytes}) ->
-                          io_lib:format("~p,~p,~.2f,~.2f,~.2f,~p~n",
-                                        [P, Card, Mean, P99, P1, Bytes])
-                  end, Stats),
-    error_logger:info_msg(Result),
-    ok = file:write_file("../data.csv", io_lib:format(Result, [])).
+    io:format(F, "p,card,median,p05,p95~n", []),
+
+    [begin
+         Stats = [run_report(P, Card, Repetitions) || Card <- Cardinalities],
+         lists:map(fun ({Card, Median, P05, P95}) ->
+                           io:format(F,
+                                     "~p,~p,~p,~p,~p~n",
+                                     [P, Card, Median, P05, P95])
+                   end, Stats)
+     end || P <- Ps],
+    io:format("~n"),
+    file:close(F).
+
+
 
 run_report(P, Card, Repetitions) ->
-    Estimations = lists:map(fun (_) ->
+    Estimations = lists:map(fun (I) ->
+                                    io:format("~p values with p=~p, rep ~p~n",
+                                              [Card, P, I]),
+                                    random:seed(erlang:now()),
                                     Elements = generate_unique(Card),
-                                    abs(Card - card(insert_many(Elements, new(P))))
+                                    Estimate = card(insert_many(Elements, new(P))),
+                                    abs(Card - Estimate) / Card
                             end, lists:seq(1, Repetitions)),
-    error_logger:info_msg("p=~p, card=~p, reps=~p~nestimates=~p~n",
-                          [P, Card, Repetitions, Estimations]),
     Hist = basho_stats_histogram:update_all(
              Estimations,
              basho_stats_histogram:new(
@@ -260,12 +275,9 @@ run_report(P, Card, Repetitions) ->
                lists:max(Estimations),
                length(Estimations))),
 
-
-    {_, Mean, _, _, _} = basho_stats_histogram:summary_stats(Hist),
-    P99 = basho_stats_histogram:quantile(0.99, Hist),
-    P1 = basho_stats_histogram:quantile(0.01, Hist),
-
-    {P, Card, Mean, P99, P1, trunc(pow(2, P))}.
+    P05 = basho_stats_histogram:quantile(0.05, Hist),
+    P95 = basho_stats_histogram:quantile(0.95, Hist),
+    {Card, median(Estimations), P05, P95}.
 
 
 perf_report() ->
