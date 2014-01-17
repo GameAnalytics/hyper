@@ -85,15 +85,31 @@ max_merge([First | Rest]) ->
                         max_merge(B, Acc)
                 end, First, Rest).
 
-max_merge(#dense{b = SmallB, buf = SmallBuf}, #dense{b = BigB, buf = BigBuf} = Big) ->
-    BigWithBuf = merge_buf(BigB, max_registers(SmallBuf ++ BigBuf)),
-    Merged = do_merge(SmallB, BigWithBuf, <<>>),
-    Big#dense{b = Merged};
+max_merge(#dense{b = SmallB, buf = SmallBuf, buf_size = SmallBufSize},
+          #dense{b = BigB, buf = BigBuf, buf_size = BigBufSize} = Big) ->
+    case SmallBufSize + BigBufSize < Big#dense.merge_threshold of
+        true ->
+            Merged = do_merge(SmallB, BigB, <<>>),
+            Big#dense{b = Merged,
+                      buf = SmallBuf ++ BigBuf,
+                      buf_size = SmallBufSize + BigBufSize};
+        false ->
+            BigWithBuf = merge_buf(BigB, max_registers(SmallBuf ++ BigBuf)),
+            Merged = do_merge(SmallB, BigWithBuf, <<>>),
+            Big#dense{b = Merged}
+    end;
 
-max_merge(#buffer{buf = Buf}, #dense{buf = DenseBuf} = Dense) ->
-    Merged = max_registers(DenseBuf ++ Buf),
-    Dense#dense{buf = Merged,
-                buf_size = length(Merged)};
+max_merge(#buffer{buf = Buf, buf_size = BufferSize},
+          #dense{buf = DenseBuf, buf_size = DenseSize} = Dense) ->
+    case BufferSize + DenseSize < Dense#dense.merge_threshold of
+        true ->
+            Dense#dense{buf = Buf ++ DenseBuf,
+                        buf_size = BufferSize + DenseSize};
+        false ->
+            Merged = max_registers(DenseBuf ++ Buf),
+            Dense#dense{buf = Merged,
+                        buf_size = length(Merged)}
+    end;
 
 max_merge(#dense{} = Dense, #buffer{} = Buffer) ->
     max_merge(Buffer, Dense);
