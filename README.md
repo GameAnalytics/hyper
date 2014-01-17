@@ -1,11 +1,11 @@
 # HyperLogLog for Erlang
 
-`hyper` is an implementation of the HyperLogLog algorithm with bias
-correction from HLL++ as the described in the excellent
-[paper by Google][]. Using HyperLogLog you can estimate the
-cardinality of large data sets or streams using very little
+This is an implementation of the HyperLogLog algorithm in Erlang. We
+have implemented the bias correction from HLL++ as the described in
+the excellent [paper by Google][]. Using HyperLogLog you can estimate
+the cardinality of large data sets or streams using very little
 memory. The relative error is 1.04 * sqrt(2^P). When creating a new
-instance of `hyper`, you provide must provide P, allowing you to trade
+HyperLogLog filter, you provide must provide P, allowing you to trade
 memory for accuracy. The union of two filters is lossless.
 
 In practice this allows you to build efficient analytics systems. For
