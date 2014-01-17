@@ -85,8 +85,9 @@ max_merge([First | Rest]) ->
                         max_merge(B, Acc)
                 end, First, Rest).
 
-max_merge(#dense{b = SmallB, buf = []}, #dense{b = BigB, buf = []} = Big) ->
-    Merged = do_merge(SmallB, BigB, <<>>),
+max_merge(#dense{b = SmallB, buf = SmallBuf}, #dense{b = BigB, buf = BigBuf} = Big) ->
+    BigWithBuf = merge_buf(BigB, max_registers(SmallBuf ++ BigBuf)),
+    Merged = do_merge(SmallB, BigWithBuf, <<>>),
     Big#dense{b = Merged};
 
 max_merge(#buffer{buf = Buf}, #dense{buf = DenseBuf} = Dense) ->
