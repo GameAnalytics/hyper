@@ -15,8 +15,9 @@ filter as if you would sequentially insert all data into a single
 filter.
 
 In addition to the base algorithm, we have implemented the bias
-correction from HLL++ as the described in the excellent [paper by
-Google][].
+correction from HLL++ as the described in the excellent
+[paper by Google][]. Bias correction greatly improves the estimates
+for lower cardinalities.
 
 
 ## Usage
@@ -32,7 +33,7 @@ Google][].
 2.136502281992361
 ```
 
-The error from estimations can be seen in this example:
+The errors introduced by estimations can be seen in this example:
 ```erlang
 3> random:seed(1,2,3).
 undefined
@@ -48,15 +49,30 @@ undefined
 
 A filter can be persisted and read later. The serialized struct is formatted for usage with jiffy:
 ```erlang
-8> Filter1 = hyper:insert(<<"foo">>, hyper:new(4)).
+8> Filter = hyper:insert(<<"foo">>, hyper:new(4)).
 {hyper,4,
        {hyper_binary,{dense,<<4,0,0,0,0,0,0,0,0,0,0,0>>,[],0,16}}}
-9> Filter2 = hyper:from_json(hyper:to_json(Filter1)).
-{hyper,4,
-       {hyper_binary,{dense,<<4,0,0,0,0,0,0,0,0,0,0,0>>,[],0,16}}}
-10> hyper:card(Filter1) =:= hyper:card(Filter2).
+9> Filter =:= hyper:from_json(hyper:to_json(Filter)).
 true
 ```
+
+You can select a different backend. See below for a description of why
+you might want to do so. They serialize in exactly the same way, but
+can't be mixed in memory.
+
+```erlang
+1> Gb = hyper:insert(<<"foo">>, hyper:new(4, hyper_gb)).
+{hyper,4,{hyper_gb,{{1,{0,1,nil,nil}},16}}}
+2> B = hyper:insert(<<"foo">>, hyper:new(4, hyper_binary)).
+{hyper,4,
+       {hyper_binary,{dense,<<4,0,0,0,0,0,0,0,0,0,0,0>>,[],0,16}}}
+3> hyper:to_json(Gb) =:= hyper:to_json(B).
+true
+4> hyper:union(Gb, B).
+** exception error: no case clause matching [{4,hyper_binary},{4,hyper_gb}]
+     in function  hyper:union/1 (src/hyper.erl, line 65)
+```
+
 
 ## Is it any good?
 
@@ -73,20 +89,20 @@ to how many registers has a value other than 0.
  * `hyper_binary`: Fixed memory usage (6 bits * 2^P), fastest on insert,
    union, cardinality and serialization. Best default choice.
 
- * hyper_bisect: Lower memory usage at lower fill rates (3 bytes per
+ * `hyper_bisect`: Lower memory usage at lower fill rates (3 bytes per
    used entry), slightly slower than hyper_binary for
    everything. Switches to a structure similar to hyper_binary when it
    would save memory. Room for further optimization.
 
- * hyper_gb: Fast inserts, very fast unions and reasonable memory
+ * `hyper_gb`: Fast inserts, very fast unions and reasonable memory
    usage at low fill rates. Unreasonable memory usage at high fill
    rates.
 
- * hyper_array: Cardinality estimation is constant, but slower than
+ * `hyper_array`: Cardinality estimation is constant, but slower than
    hyper_gb for low fill rates. Uses much more memory at lower fill
    rates, but stays constant from 25% and upwards.
 
- * hyper_binary_rle: Dud
+ * `hyper_binary_rle`: Dud
 
 You can also implement your own backend. In `hyper_test` theres a
 bunch of tests run for all backends, including some PropEr tests. The
