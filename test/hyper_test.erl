@@ -5,6 +5,16 @@
 -record(hyper, {p, registers}). % copy of #hyper in hyper.erl
 
 hyper_test_() ->
+    ProperOpts = [{max_size, 1000},
+                  {numtests, 100},
+                  {to_file, user}],
+    RunProp = fun (P) ->
+                      {timeout, 600,
+                       fun () ->
+                               ?assert(proper:quickcheck(P, ProperOpts))
+                       end}
+              end,
+
     {foreach, fun () -> ok end, fun (_) -> ok end,
      [
       ?_test(basic_t()),
@@ -18,14 +28,12 @@ hyper_test_() ->
       ?_test(small_big_union_t()),
       ?_test(intersect_card_t()),
       ?_test(bad_serialization_t()),
-      {timeout, 600, fun () -> ?assert(proper:quickcheck(prop_set(),
-                                                         [{max_size, 1000},
-                                                          {numtests, 1000},
-                                                          {to_file, user}])) end},
-      {timeout, 600, fun () -> ?assert(proper:quickcheck(prop_serialize(),
-                                                         [{max_size, 1000},
-                                                          {numtests, 1000},
-                                                          {to_file, user}])) end}
+      RunProp(prop_union(hyper_binary)),
+      RunProp(prop_union(hyper_array)),
+      RunProp(prop_union(hyper_bisect)),
+      RunProp(prop_union(hyper_gb)),
+      RunProp(prop_set()),
+      RunProp(prop_serialize())
      ]}.
 
 basic_t() ->
@@ -331,10 +339,35 @@ backends() ->
 gen_values() ->
     ?SIZED(Size, gen_values(Size)).
 
+%% gen_values(0) ->
+%%     [<<(random:uniform(100000000000000)):64/integer>>];
+%% gen_values(Size) ->
+%%     [<<(random:uniform(100000000000000)):64/integer>> | gen_values(Size-1)].
+
 gen_values(0) ->
-    [<<(random:uniform(100000000000000)):64/integer>>];
+    [non_empty(binary())];
 gen_values(Size) ->
-    [<<(random:uniform(100000000000000)):64/integer>> | gen_values(Size-1)].
+    [non_empty(binary()) | gen_values(Size-1)].
+
+gen_filters(Values) ->
+    ?LET(NumFilters, choose(2, 10),
+         gen_filters(Values, length(Values) div NumFilters, NumFilters)).
+
+gen_filters(Values, Size, 0) ->
+    [Values];
+gen_filters(Values, Size, NumFilters) ->
+    case split(Size, Values) of
+        {[], _} ->
+            [];
+        {Filter, Rest} ->
+            [Filter | gen_filters(Rest, Size, NumFilters-1)]
+    end.
+
+
+split(N, []) -> {[], []};
+split(N, L) when length(L) < N -> {L, []};
+split(N, L) -> lists:split(N, L).
+
 
 gen_getset(P) ->
     ?SIZED(Size, gen_getset(Size, P)).
@@ -391,19 +424,31 @@ prop_set() ->
 
 prop_serialize() ->
     ?FORALL(
-       {LeftMod, RightMod, P}, {oneof(backends()),
-                                oneof(backends()),
-                                choose(4, 16)},
-       ?FORALL(
-          Values, gen_values(),
-          begin
-              Left = hyper:compact(
-                       hyper:insert_many(Values, hyper:new(P, LeftMod))),
-              Right = hyper:compact(
-                        hyper:insert_many(Values, hyper:new(P, RightMod))),
+       {LeftMod, RightMod, P, Values}, {oneof(backends()),
+                                        oneof(backends()),
+                                        choose(4, 16),
+                                        gen_values()},
+       begin
+           Left = hyper:compact(
+                    hyper:insert_many(Values, hyper:new(P, LeftMod))),
+           Right = hyper:compact(
+                     hyper:insert_many(Values, hyper:new(P, RightMod))),
 
-              hyper:to_json(Left) =:= hyper:to_json(Right)
-          end)).
+           hyper:to_json(Left) =:= hyper:to_json(Right)
+       end).
+
+prop_union(Mod) ->
+    ?FORALL(
+       {P, NumFilters, Values}, {choose(4, 16), choose(2, 5), gen_values()},
+       begin
+           Filters = lists:map(fun (Vs) ->
+                                       hyper:insert_many(Vs, hyper:new(P, Mod))
+                               end, partition(NumFilters, Values)),
+           Filter = hyper:insert_many(Values, hyper:new(P, Mod)),
+           Union = hyper:union(Filters),
+           hyper:card(Filter) =:= hyper:card(Union)
+       end).
+
 
 %%
 %% HELPERS
@@ -430,3 +475,24 @@ random_bytes(Acc, 0) -> Acc;
 random_bytes(Acc, N) ->
     Int = random:uniform(100000000000000),
     random_bytes([<<Int:64/integer>> | Acc], N-1).
+
+
+%% Lifted from stdlib2, https://github.com/cannedprimates/stdlib2
+partition(N, Xs)
+  when is_integer(N)
+     , N > 0
+     , is_list(Xs) ->
+  Len = length(Xs),
+  case {Len > 0, Len > N} of
+    {true,  true } -> [take(N, Xs)|partition(N, drop(N, Xs))];
+    {true,  false} -> [Xs];
+    {false, false} -> []
+  end.
+
+take(N, _) when N =< 0     -> [];
+take(_, [])                -> [];
+take(N, [X|Xs])            -> [X|take(N - 1, Xs)].
+
+drop(N, Xs) when N =< 0    -> Xs;
+drop(_, [])                -> [];
+drop(N, [_|Xs])            -> drop(N - 1, Xs).

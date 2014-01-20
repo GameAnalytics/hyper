@@ -96,7 +96,9 @@ max_merge(#dense{b = SmallB, buf = SmallBuf, buf_size = SmallBufSize},
         false ->
             BigWithBuf = merge_buf(BigB, max_registers(SmallBuf ++ BigBuf)),
             Merged = do_merge(SmallB, BigWithBuf, <<>>),
-            Big#dense{b = Merged}
+            Big#dense{b = Merged,
+                      buf = [],
+                      buf_size = 0}
     end;
 
 max_merge(#buffer{buf = Buf, buf_size = BufferSize},
@@ -122,8 +124,14 @@ max_merge(#buffer{buf = LeftBuf, buf_size = LeftBufSize},
                          buf_size = LeftBufSize + RightBufSize};
         false ->
             Merged = max_registers(LeftBuf ++ RightBuf),
-            Right#buffer{buf = Merged,
-                         buf_size = length(Merged)}
+            NewRight = Right#buffer{buf = Merged,
+                                    buf_size = length(Merged)},
+            case NewRight#buffer.buf_size < NewRight#buffer.convert_threshold of
+                true ->
+                    NewRight;
+                false ->
+                    buffer2dense(NewRight)
+            end
     end.
 
 
@@ -181,7 +189,7 @@ m(P) ->
 empty_binary(M) ->
     list_to_bitstring([<<0:?VALUE_SIZE/integer>> || _ <-  lists:seq(0, M-1)]).
 
-max_registers(Tmp) ->
+max_registers(Buf) ->
     lists:foldl(fun ({I, V}, Acc) ->
                           case orddict:find(I, Acc) of
                               {ok, R} when R >= V ->
@@ -189,7 +197,7 @@ max_registers(Tmp) ->
                               _ ->
                                   orddict:store(I, V, Acc)
                           end
-                  end, orddict:new(), lists:reverse(lists:sort(Tmp))).
+                  end, orddict:new(), lists:reverse(lists:sort(Buf))).
 
 
 buffer2dense(#buffer{buf = Buf, p = P}) ->
@@ -209,8 +217,8 @@ do_merge(<<Left:?VALUE_SIZE/integer, SmallRest/bitstring>>,
 fold(F, Acc, #buffer{} = Buffer) ->
     fold(F, Acc, buffer2dense(Buffer));
 
-fold(F, Acc, #dense{b = B, buf = []}) ->
-    do_fold(F, Acc, B, 0).
+fold(F, Acc, #dense{b = B, buf = Buf}) ->
+    do_fold(F, Acc, merge_buf(B, max_registers(Buf)), 0).
 
 do_fold(_, Acc, <<>>, _) ->
     Acc;

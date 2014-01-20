@@ -66,9 +66,7 @@ union(Filters) when is_list(Filters) ->
                                        {P, Mod}
                                end, Filters)) of
         [{_P, Mod}] ->
-            Registers = lists:map(fun (H) ->
-                                          Compact = compact(H),
-                                          #hyper{registers = {_, R}} = Compact,
+            Registers = lists:map(fun (#hyper{registers = {_, R}}) ->
                                           R
                                   end, Filters),
 
