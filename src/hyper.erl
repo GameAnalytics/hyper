@@ -24,13 +24,15 @@
 %% Exported for testing
 -export([run_of_zeroes/1, perf_report/0, estimate_report/0]).
 
+-define(DEFAULT_BACKEND, hyper_binary).
+
 %%
 %% API
 %%
 
 -spec new(precision()) -> filter().
 new(P) ->
-    new(P, hyper_binary).
+    new(P, ?DEFAULT_BACKEND).
 
 -spec new(precision(), module()) -> filter().
 new(P, Mod) when 4 =< P andalso P =< 16 andalso is_atom(Mod) ->
@@ -138,7 +140,7 @@ to_json(#hyper{p = P, registers = {Mod, Registers}}) ->
 
 -spec from_json(any()) -> filter().
 from_json(Struct) ->
-    from_json(Struct, hyper_gb).
+    from_json(Struct, ?DEFAULT_BACKEND).
 
 -spec from_json(any(), module()) -> filter().
 from_json({Struct}, Mod) ->
@@ -282,7 +284,7 @@ run_report(P, Card, Repetitions) ->
 
 perf_report() ->
     Ps      = [15],
-    Cards   = [1, 100, 1000, 2500, 5000, 10000,
+    Cards   = [1, 100, 500, 1000, 2500, 5000, 10000,
                15000, 25000, 50000, 100000, 1000000],
     Mods    = [hyper_gb, hyper_array, hyper_bisect, hyper_binary],
     Repeats = 10,

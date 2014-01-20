@@ -1,12 +1,11 @@
 # HyperLogLog for Erlang
 
-This is an implementation of the HyperLogLog algorithm in Erlang. We
-have implemented the bias correction from HLL++ as the described in
-the excellent [paper by Google][]. Using HyperLogLog you can estimate
-the cardinality of large data sets or streams using very little
-memory. The relative error is 1.04 * sqrt(2^P). When creating a new
-HyperLogLog filter, you provide must provide P, allowing you to trade
-memory for accuracy. The union of two filters is lossless.
+This is an implementation of the HyperLogLog algorithm in
+Erlang. Using HyperLogLog you can estimate the cardinality of very
+large data sets using constant memory. The relative error is `1.04 *
+sqrt(2^P)`. When creating a new HyperLogLog filter, you provide the
+precision P, allowing you to trade memory for accuracy. The union of
+two filters is lossless.
 
 In practice this allows you to build efficient analytics systems. For
 example, you can create a new filter in each mapper and feed it a
@@ -14,6 +13,10 @@ portion of your dataset while the reducers simply union together all
 filters they receive. The filter you end up with is exactly the same
 filter as if you would sequentially insert all data into a single
 filter.
+
+In addition to the base algorithm, we have implemented the bias
+correction from HLL++ as the described in the excellent [paper by
+Google][].
 
 
 ## Usage
@@ -43,9 +46,21 @@ undefined
 10007.654167606248
 ```
 
+A filter can be persisted and read later. The serialized struct is formatted for usage with jiffy:
+```erlang
+8> Filter1 = hyper:insert(<<"foo">>, hyper:new(4)).
+{hyper,4,
+       {hyper_binary,{dense,<<4,0,0,0,0,0,0,0,0,0,0,0>>,[],0,16}}}
+9> Filter2 = hyper:from_json(hyper:to_json(Filter1)).
+{hyper,4,
+       {hyper_binary,{dense,<<4,0,0,0,0,0,0,0,0,0,0,0>>,[],0,16}}}
+10> hyper:card(Filter1) =:= hyper:card(Filter2).
+true
+```
+
 ## Is it any good?
 
-Yes.
+Yes. At Game Analytics we use it extensively.
 
 ## Backends
 
@@ -54,7 +69,7 @@ pursuit of finding the right trade-off. A simple performance
 comparison can be seen by running `make perf_report`. Fill rate refers
 to how many registers has a value other than 0.
 
- * hyper_binary: Fixed memory usage (6 bits * 2^P), fastest on insert,
+ * `hyper_binary`: Fixed memory usage (6 bits * 2^P), fastest on insert,
    union, cardinality and serialization. Best default choice.
 
  * hyper_bisect: Lower memory usage at lower fill rates (3 bytes per
