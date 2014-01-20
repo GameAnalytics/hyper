@@ -315,9 +315,12 @@ perf_report() ->
                              [generate_unique(Card), new(P, Mod)]),
              ReusableH = compact(insert_many(generate_unique(Card), new(P, Mod))),
 
-             UnionUs = Time(fun (L, R) -> compact(union(L, R)) end,
-                            [insert_many(generate_unique(Card div 10), new(P, Mod)),
-                             ReusableH]),
+             UnionUs = Time(fun (Fs) -> union(Fs) end,
+                            [[insert_many(generate_unique(Card div 10), new(P, Mod)),
+                              insert_many(generate_unique(Card div 10), new(P, Mod)),
+                              insert_many(generate_unique(Card div 10), new(P, Mod)),
+                              insert_many(generate_unique(Card div 10), new(P, Mod)),
+                              insert_many(generate_unique(Card div 10), new(P, Mod))]]),
 
              CardUs = Time(fun card/1, [ReusableH]),
 
