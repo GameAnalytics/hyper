@@ -65,7 +65,8 @@ Yes. At Game Analytics we use it extensively.
 ## Backends
 
 Effort has been spent on implementing different backends in the
-pursuit of finding the right trade-off. A simple performance
+pursuit of finding the right performance trade-off. The estimate will
+always be the same, regardless of backend. A simple performance
 comparison can be seen by running `make perf_report`. Fill rate refers
 to how many registers has a value other than 0.
 

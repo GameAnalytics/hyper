@@ -239,7 +239,7 @@ median(Ns) ->
 
 estimate_report() ->
     Ps            = lists:seq(11, 16),
-    Cardinalities = [100, 1000, 10000, 100000, 1000000, 10000000],
+    Cardinalities = [100, 1000, 10000, 100000, 1000000],
     Repetitions   = 50,
 
     {ok, F} = file:open("estimates.csv", [write]),
@@ -258,16 +258,19 @@ estimate_report() ->
     file:close(F).
 
 
-
 run_report(P, Card, Repetitions) ->
-    Estimations = lists:map(fun (I) ->
-                                    io:format("~p values with p=~p, rep ~p~n",
-                                              [Card, P, I]),
-                                    random:seed(erlang:now()),
-                                    Elements = generate_unique(Card),
-                                    Estimate = card(insert_many(Elements, new(P))),
-                                    abs(Card - Estimate) / Card
-                            end, lists:seq(1, Repetitions)),
+    {ok, Estimations} = s2_par:map(
+                          fun (I) ->
+                                  io:format("~p values with p=~p, rep ~p~n",
+                                            [Card, P, I]),
+                                  random:seed(erlang:now()),
+                                  Elements = generate_unique(Card),
+                                  Estimate = card(insert_many(Elements, new(P))),
+                                  abs(Card - Estimate) / Card
+                          end,
+                          lists:seq(1, Repetitions),
+                          [{workers, 8}]),
+
     Hist = basho_stats_histogram:update_all(
              Estimations,
              basho_stats_histogram:new(
