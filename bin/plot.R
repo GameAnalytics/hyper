@@ -12,13 +12,16 @@ p_labeller <- function (var, value) {
 
 p <- ggplot(data = stats, aes(x = card, y = median)) +
   geom_point(aes(colour = factor(p))) +
+  geom_text(aes(label = percent(median)), hjust = -0.2, size = 2) +
   geom_errorbar(aes(ymax = p95, ymin = p05, colour = factor(p)), alpha = 0.8, size=0.2) +
   scale_x_log10(breaks = unique(stats$card), labels = comma) +
   ##scale_x_continuous(breaks = seq(0, max(stats$card), by = 5000), labels = comma) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   ##scale_y_continuous(breaks = c(0:100 / 1000), labels = percent) +
   scale_y_continuous(labels = percent) +
-  facet_grid(. ~ p)
+  facet_grid(. ~ p) +
+  ylab("Median relative error") +
+  xlab("Cardinality")
 
 
 ggsave(file = "hyper.png", width = 10, height = 6)
