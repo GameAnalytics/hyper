@@ -37,7 +37,7 @@
                     hyper:registers()) ->
     hyper:registers().
 
-%% @doc: Sum of 2^R where R is the value in each register.
+%% @doc: Sum of 2^-R where R is the value in each register.
 -callback register_sum(hyper:registers()) ->
     float().
 
