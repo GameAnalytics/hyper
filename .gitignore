@@ -5,3 +5,5 @@ ebin
 hyper.png
 estimates.csv
 erl_crash.dump
+*.so
+*.o
