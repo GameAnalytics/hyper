@@ -8,7 +8,8 @@
 -export([new/1, new/2, insert/2, insert_many/2]).
 -export([union/1, union/2]).
 -export([card/1, intersect_card/2]).
--export([to_json/1, from_json/1, from_json/2, compact/1, bytes/1]).
+-export([to_json/1, from_json/1, from_json/2, precision/1, bytes/1]).
+-export([compact/1]).
 
 -type precision() :: 4..16.
 -type registers() :: any().
@@ -115,6 +116,9 @@ card(#hyper{registers = {Mod, Registers0}, p = P}) ->
         false ->
             Ep
     end.
+
+precision(#hyper{p = Precision}) ->
+    Precision.
 
 bytes(#hyper{registers = {Mod, Registers}}) ->
     Mod:bytes(Registers).
