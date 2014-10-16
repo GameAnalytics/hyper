@@ -59,12 +59,21 @@ serialization_t() ->
 
 
 reduce_precision_t() ->
-    [?assertEqual(1, trunc(
-                       hyper:card(
-                         hyper:reduce_precision(4,
-                           hyper:insert(<<"1">>, hyper:new(6, Mod))))))
-     %|| Mod <- backends()].
-     || Mod <- [hyper_binary]].
+    random:seed(1, 2, 3),
+    Card = 1000,
+    Values = generate_unique(Card),
+    [begin
+        HighRes = hyper:insert_many(Values, hyper:new(16, Mod)),
+        lists:foreach(
+            fun (P) ->
+                     Estimate = hyper:card(hyper:reduce_precision(P, HighRes)),
+                     % accept error rate for one precision step less
+                     M = trunc(math:pow(2, P-1)),
+                     Error = 1.04 / math:sqrt(M),
+                     ?assert(abs(Estimate - Card) < Card * Error)
+            end, lists:seq(4, 15))
+     %end || Mod <- backend()].
+     end || Mod <- [hyper_binary]].
 
 
 backend_t() ->
