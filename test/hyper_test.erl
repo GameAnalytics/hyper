@@ -19,12 +19,14 @@ hyper_test_() ->
      [
       ?_test(basic_t()),
       ?_test(serialization_t()),
+      ?_test(reduce_precision_t()),
       {timeout, 60, ?_test(backend_t())},
       ?_test(encoding_t()),
       ?_test(register_sum_t()),
       {timeout, 30, ?_test(error_range_t())},
       ?_test(many_union_t()),
       ?_test(union_t()),
+      ?_test(union_mixed_precision_t()),
       ?_test(small_big_union_t()),
       ?_test(intersect_card_t()),
       ?_test(bad_serialization_t()),
@@ -55,6 +57,14 @@ serialization_t() ->
     ?assertEqual(Hyper#hyper.p, (hyper:from_json(
                                    hyper:to_json(Hyper), Mod))#hyper.p).
 
+
+reduce_precision_t() ->
+    [?assertEqual(1, trunc(
+                       hyper:card(
+                         hyper:reduce_precision(4,
+                           hyper:insert(<<"1">>, hyper:new(6, Mod))))))
+     %|| Mod <- backends()].
+     || Mod <- [hyper_binary]].
 
 
 backend_t() ->
@@ -249,6 +259,21 @@ union_t() ->
     ?assert(abs(Intersection - sets:size(
                                  sets:intersection(LeftDistinct, RightDistinct)))
             < 200).
+
+
+
+union_mixed_precision_t() ->
+    [?assertEqual(4, trunc(
+                       hyper:card(
+                         hyper:union([
+                             hyper:insert(<<"1">>, hyper:new(4, Mod)),
+                             hyper:insert(<<"2">>, hyper:new(6, Mod)),
+                             hyper:insert(<<"3">>, hyper:new(8, Mod)),
+                             hyper:insert(<<"4">>, hyper:new(16, Mod))
+                         ]))))
+     %|| Mod <- backends()].
+     || Mod <- [hyper_binary]].
+
 
 small_big_union_t() ->
     random:seed(1, 2, 3),

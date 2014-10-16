@@ -37,6 +37,12 @@
                     hyper:registers()) ->
     hyper:registers().
 
+%% @doc: Reduce the precision of the registers. Used for mixed-precision
+%% union by first reducing the precision to the lowest of all filters.
+-callback reduce_precision(hyper:precision(),
+                           hyper:registers()) ->
+    hyper:registers().
+
 %% @doc: Sum of 2^-R where R is the value in each register.
 -callback register_sum(hyper:registers()) ->
     float().
@@ -57,8 +63,3 @@
 %% @doc: Size in bytes used to represent the registers in memory.
 -callback bytes(hyper:registers()) ->
     integer().
-
-
-
-
-

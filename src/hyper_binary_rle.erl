@@ -1,7 +1,8 @@
 -module(hyper_binary_rle).
 -include_lib("eunit/include/eunit.hrl").
 
--export([new/1, set/3, compact/1, max_merge/1, max_merge/2, bytes/1]).
+-export([new/1, set/3, compact/1, max_merge/1, max_merge/2,
+         reduce_precision/2, bytes/1]).
 -export([register_sum/1, zero_count/1, encode_registers/1, decode_registers/2]).
 
 -behaviour(hyper_register).
@@ -61,6 +62,8 @@ max_merge(Small, Big) ->
     do_max_merge(Small, Big).
 
 
+reduce_precision(_NewP, _B) ->
+    throw(not_implemented).
 
 %%
 %% INTERNALS
@@ -293,7 +296,7 @@ proper_test_() ->
              ?assertEqual(compact(R),
                           decode_registers(encode_registers(R), P))
      end}.
-    
+
 
 
 

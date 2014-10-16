@@ -6,6 +6,7 @@
          set/3,
          max_merge/1,
          max_merge/2,
+         reduce_precision/2,
          bytes/1,
          register_sum/1,
          zero_count/1,
@@ -102,6 +103,8 @@ max_merge({sparse, Sparse, P, _}, {dense, Dense}) ->
               lists:reverse(
                 do_dense_merge(Dense, bisect2dense(Sparse, P))))}.
 
+reduce_precision(_NewP, _B) ->
+    throw(not_implemented).
 
 compact(B) ->
     B.

@@ -6,6 +6,7 @@
          set/3,
          max_merge/1,
          max_merge/2,
+         reduce_precision/2,
          bytes/1,
          register_sum/1,
          zero_count/1,
@@ -49,6 +50,9 @@ max_merge(Small, Big) ->
                           set(Index, L, Registers)
                   end
           end, Big, Small).
+
+reduce_precision(_NewP, _Register) ->
+    throw(not_implemented).
 
 fold(F, A, {{_, T}, _M}) when is_function(F, 3) ->
     fold_1(F, A, T).

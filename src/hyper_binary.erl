@@ -14,6 +14,7 @@
          compact/1,
          max_merge/1,
          max_merge/2,
+         reduce_precision/2,
          bytes/1,
          register_sum/1,
          zero_count/1,
@@ -135,7 +136,22 @@ max_merge(#buffer{buf = LeftBuf, buf_size = LeftBufSize},
     end.
 
 
+reduce_precision(NewP, #dense{} = Dense) ->
+    Buf = register_fold(m(NewP), Dense),
+    Empty = new_dense(NewP),
+    compact(Empty#dense{buf = Buf});
+reduce_precision(NewP, #buffer{} = Buffer) ->
+    Buf = max_registers(register_fold(m(NewP), Buffer)),
+    Empty = new_buffer(NewP),
+    Empty#buffer{buf = Buf, buf_size = length(Buf)}.
 
+
+%% fold an HLL to a lower number of registers `NewM` by projecting the values
+%% onto their new index, see
+%% http://research.neustar.biz/2012/09/12/set-operations-on-hlls-of-different-sizes/
+%% NOTE: this function does not perform the max_registers step
+register_fold(NewM, B) ->
+    fold(fun (I, V, Acc) -> [{I rem NewM, V} | Acc] end, [], B).
 
 register_sum(B) ->
     fold(fun (_, 0, Acc) -> Acc + 1.0;

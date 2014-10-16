@@ -9,7 +9,7 @@
 -export([union/1, union/2]).
 -export([card/1, intersect_card/2]).
 -export([to_json/1, from_json/1, from_json/2, precision/1, bytes/1]).
--export([compact/1]).
+-export([compact/1, reduce_precision/2]).
 
 -type precision() :: 4..16.
 -type registers() :: any().
@@ -62,17 +62,25 @@ insert_many(L, Hyper) ->
 
 -spec union([filter()]) -> filter().
 union(Filters) when is_list(Filters) ->
-    %% Must have the same P and backend
     case lists:usort(lists:map(fun (#hyper{p = P, registers = {Mod, _}}) ->
                                        {P, Mod}
                                end, Filters)) of
+        %% same P and backend
         [{_P, Mod}] ->
             Registers = lists:map(fun (#hyper{registers = {_, R}}) ->
                                           R
                                   end, Filters),
 
             [First | _] = Filters,
-            First#hyper{registers = {Mod, Mod:max_merge(Registers)}}
+            First#hyper{registers = {Mod, Mod:max_merge(Registers)}};
+
+        %% mixed P, but still must have same backend
+        [{MinP, Mod} | _] ->
+            FoldedFilters = lists:map(fun (#hyper{registers = {M, _}} = F)
+                                        when M =:= Mod ->
+                                          hyper:reduce_precision(MinP, F)
+                                  end, Filters),
+            union(FoldedFilters)
     end.
 
 union(Small, Big) ->
@@ -125,6 +133,12 @@ bytes(#hyper{registers = {Mod, Registers}}) ->
 
 compact(#hyper{registers = {Mod, Registers}} = Hyper) ->
     Hyper#hyper{registers = {Mod, Mod:compact(Registers)}}.
+
+reduce_precision(P, #hyper{p = OldP, registers = {Mod, Registers}} = Hyper)
+  when P < OldP ->
+    Hyper#hyper{p = P, registers = {Mod, Mod:reduce_precision(P, Registers)}};
+reduce_precision(P, #hyper{p = P} = Filter) ->
+    Filter.
 
 %%
 %% SERIALIZATION
