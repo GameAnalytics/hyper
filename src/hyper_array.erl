@@ -4,6 +4,7 @@
          set/3,
          max_merge/1,
          max_merge/2,
+         reduce_precision/2,
          bytes/1,
          register_sum/1,
          zero_count/1,
@@ -40,6 +41,9 @@ max_merge(Left, Right) ->
                          Registers
                  end
          end, Right, Left).
+
+reduce_precision(_NewP, _A) ->
+    throw(not_implemented).
 
 bytes(A) ->
     erts_debug:flat_size(A) * 8.
