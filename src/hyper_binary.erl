@@ -43,6 +43,9 @@ new_dense(P) ->
     #dense{b = empty_binary(M), buf = [], buf_size = 0, merge_threshold = T}.
 
 
+set(Index, Value, #buffer{buf = [{Index, OldValue} | Rest]} = Buffer) ->
+    Buffer#buffer{buf = [{Index, max(Value, OldValue)} | Rest]};
+
 set(Index, Value, #buffer{buf = Buf, buf_size = BufSize} = Buffer) ->
     NewBuffer = Buffer#buffer{buf = [{Index, Value} | Buf],
                               buf_size = BufSize + 1},
@@ -82,9 +85,7 @@ compact(#dense{b = B, buf = Buf} = Dense) ->
 
 
 max_merge([First | Rest]) ->
-    lists:foldl(fun (B, Acc) ->
-                        max_merge(B, Acc)
-                end, First, Rest).
+    lists:foldl(fun max_merge/2, First, Rest).
 
 max_merge(#dense{b = SmallB, buf = SmallBuf, buf_size = SmallBufSize},
           #dense{b = BigB, buf = BigBuf, buf_size = BigBufSize} = Big) ->
