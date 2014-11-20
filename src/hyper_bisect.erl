@@ -95,13 +95,11 @@ max_merge({dense, Left}, {dense, Right}) ->
 
 max_merge({dense, Dense}, {sparse, Sparse, P, _}) ->
     {dense, iolist_to_binary(
-              lists:reverse(
-                do_dense_merge(Dense, bisect2dense(Sparse, P))))};
+              do_dense_merge(Dense, bisect2dense(Sparse, P)))};
 
 max_merge({sparse, Sparse, P, _}, {dense, Dense}) ->
     {dense, iolist_to_binary(
-              lists:reverse(
-                do_dense_merge(Dense, bisect2dense(Sparse, P))))}.
+              do_dense_merge(Dense, bisect2dense(Sparse, P)))}.
 
 reduce_precision(_NewP, _B) ->
     throw(not_implemented).

@@ -30,10 +30,10 @@ hyper_test_() ->
       ?_test(small_big_union_t()),
       ?_test(intersect_card_t()),
       ?_test(bad_serialization_t()),
-      RunProp(prop_union(hyper_binary)),
-      RunProp(prop_union(hyper_array)),
-      RunProp(prop_union(hyper_bisect)),
-      RunProp(prop_union(hyper_gb)),
+      {"Union property with hyper_binary", RunProp(prop_union(hyper_binary))},
+      {"Union property with hyper_array", RunProp(prop_union(hyper_array))},
+      {"Union property with hyper_bisect", RunProp(prop_union(hyper_bisect))},
+      {"Union property with hyper_gb", RunProp(prop_union(hyper_gb))},
       RunProp(prop_set()),
       RunProp(prop_serialize())
      ]}.
@@ -373,15 +373,15 @@ backends() ->
 gen_values() ->
     ?SIZED(Size, gen_values(Size)).
 
-%% gen_values(0) ->
-%%     [<<(random:uniform(100000000000000)):64/integer>>];
-%% gen_values(Size) ->
-%%     [<<(random:uniform(100000000000000)):64/integer>> | gen_values(Size-1)].
-
 gen_values(0) ->
-    [non_empty(binary())];
+    [<<(random:uniform(100000000000000)):64/integer>>];
 gen_values(Size) ->
-    [non_empty(binary()) | gen_values(Size-1)].
+    [<<(random:uniform(100000000000000)):64/integer>> | gen_values(Size-1)].
+
+%%gen_values(0) ->
+%%    [non_empty(binary())];
+%%gen_values(Size) ->
+%%    [non_empty(binary()) | gen_values(Size-1)].
 
 gen_filters(Values) ->
     ?LET(NumFilters, choose(2, 10),
