@@ -305,7 +305,7 @@ perf_report() ->
     Ps      = [15],
     Cards   = [1, 100, 500, 1000, 2500, 5000, 10000,
                15000, 25000, 50000, 100000, 1000000],
-    Mods    = [hyper_gb, hyper_array, hyper_bisect, hyper_binary],
+    Mods    = [hyper_gb, hyper_array, hyper_bisect, hyper_binary, hyper_carray],
     Repeats = 10,
 
     Time = fun (F, Args) ->
