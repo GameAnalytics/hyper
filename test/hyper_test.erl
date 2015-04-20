@@ -30,6 +30,7 @@ hyper_test_() ->
       ?_test(small_big_union_t()),
       ?_test(intersect_card_t()),
       ?_test(bad_serialization_t()),
+      {"Union property with hyper_carry", RunProp(prop_union(hyper_carray))},
       {"Union property with hyper_binary", RunProp(prop_union(hyper_binary))},
       {"Union property with hyper_array", RunProp(prop_union(hyper_array))},
       {"Union property with hyper_bisect", RunProp(prop_union(hyper_bisect))},
@@ -85,11 +86,13 @@ backend_t() ->
     Array  = hyper:compact(hyper:insert_many(Values, hyper:new(P, hyper_array))),
     Bisect = hyper:compact(hyper:insert_many(Values, hyper:new(P, hyper_bisect))),
     Binary = hyper:compact(hyper:insert_many(Values, hyper:new(P, hyper_binary))),
+    Carray = hyper:compact(hyper:insert_many(Values, hyper:new(P, hyper_carray))),
 
     {hyper_gb    , GbRegisters}     = Gb#hyper.registers,
     {hyper_array , ArrayRegisters}  = Array#hyper.registers,
     {hyper_bisect, BisectRegisters} = Bisect#hyper.registers,
     {hyper_binary, BinaryRegisters} = Binary#hyper.registers,
+    {hyper_carray, CarrayRegisters} = Carray#hyper.registers,
 
     ExpectedRegisters = lists:foldl(
                           fun (Value, Registers) ->
@@ -120,21 +123,25 @@ backend_t() ->
     ?assertEqual(ExpectedBytes, hyper_array:encode_registers(ArrayRegisters)),
     ?assertEqual(ExpectedBytes, hyper_bisect:encode_registers(BisectRegisters)),
     ?assertEqual(ExpectedBytes, hyper_binary:encode_registers(BinaryRegisters)),
+    ?assertEqual(ExpectedBytes, hyper_carray:encode_registers(CarrayRegisters)),
 
     ?assertEqual(hyper:card(Gb),
                  hyper:card(hyper:from_json(hyper:to_json(Array), hyper_gb))),
     ?assertEqual(Array, hyper:from_json(hyper:to_json(Array), hyper_array)),
-    ?assertEqual(Array, hyper:from_json(hyper:to_json(Bisect), hyper_array)),
     ?assertEqual(Bisect, hyper:from_json(hyper:to_json(Array), hyper_bisect)),
+    ?assertEqual(Binary, hyper:from_json(hyper:to_json(Binary), hyper_binary)),
+    ?assertEqual(Carray, hyper:from_json(hyper:to_json(Carray), hyper_carray)),
 
 
     ?assertEqual(hyper:to_json(Gb), hyper:to_json(Array)),
     ?assertEqual(hyper:to_json(Gb), hyper:to_json(Bisect)),
     ?assertEqual(hyper:to_json(Gb), hyper:to_json(Binary)),
+    ?assertEqual(hyper:to_json(Gb), hyper:to_json(Carray)),
 
     ?assertEqual(hyper:card(Gb), hyper:card(Array)),
     ?assertEqual(hyper:card(Gb), hyper:card(Bisect)),
-    ?assertEqual(hyper:card(Gb), hyper:card(Binary)).
+    ?assertEqual(hyper:card(Gb), hyper:card(Binary)),
+    ?assertEqual(hyper:card(Gb), hyper:card(Carray)).
 
 
 
@@ -186,7 +193,7 @@ register_sum_t() ->
 
 
 error_range_t() ->
-    Mods = [hyper_gb, hyper_array, hyper_bisect, hyper_binary],
+    Mods = backends(),
     Run = fun (Cardinality, P, Mod) ->
                   lists:foldl(fun (V, H) ->
                                       hyper:insert(V, H)
@@ -367,7 +374,7 @@ bad_serialization_t() ->
 %%
 
 backends() ->
-    [hyper_gb, hyper_array, hyper_bisect, hyper_binary].
+    [hyper_gb, hyper_array, hyper_bisect, hyper_binary, hyper_carray].
 
 
 gen_values() ->
