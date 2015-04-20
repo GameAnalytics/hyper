@@ -133,7 +133,7 @@ static ERL_NIF_TERM set(ErlNifEnv * env, int argc,
 void dtor(ErlNifEnv * env, void *obj);
 
 /*
- * Given a list of at least 2 hyper_carrays [A,B,...], merge into a single new
+ * Given a list of at least 1 hyper_carrays [A,B,...], merge into a single new
  * hyper_carray N. Where the i-ths item N[i] is max(A[i], B[i], ...).
  * A, B, and so on are assumed to be _different_ hyper_carrays.
  */
@@ -148,7 +148,7 @@ static ERL_NIF_TERM max_merge(ErlNifEnv * env, int argc,
 	    || !enif_get_list_cell(env, argv[0], &head, &tail))
 		return enif_make_badarg(env);
 
-	if (narrays < 2)
+	if (narrays < 1)
 		return enif_make_badarg(env);
 
 	void *tmp = NULL;
