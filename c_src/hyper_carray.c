@@ -133,7 +133,7 @@ static ERL_NIF_TERM set(ErlNifEnv * env, int argc,
 void dtor(ErlNifEnv * env, void *obj);
 
 /*
- * Given a list of at least 2 hyper_carrays [A,B,...], merge into a single new
+ * Given a list of at least 1 hyper_carrays [A,B,...], merge into a single new
  * hyper_carray N. Where the i-ths item N[i] is max(A[i], B[i], ...).
  * A, B, and so on are assumed to be _different_ hyper_carrays.
  */
@@ -148,7 +148,7 @@ static ERL_NIF_TERM max_merge(ErlNifEnv * env, int argc,
 	    || !enif_get_list_cell(env, argv[0], &head, &tail))
 		return enif_make_badarg(env);
 
-	if (narrays < 2)
+	if (narrays < 1)
 		return enif_make_badarg(env);
 
 	void *tmp = NULL;
@@ -249,11 +249,11 @@ static ERL_NIF_TERM encode_registers(ErlNifEnv * env, int argc,
 	struct hyper_carray *restrict arr = NULL;
 	HYPER_CARRAY_OR_BADARG(argv[0], arr);
 
-	size_t nbytes = HYPER_CARRAY_SIZE + arr->size;
+	size_t nbytes = arr->size;
 
 	ERL_NIF_TERM bin;
 	unsigned char *buf = enif_make_new_binary(env, nbytes, &bin);
-	memcpy(buf, arr, nbytes);
+	memcpy(buf, arr->items, nbytes);
 
 	return bin;
 }
@@ -273,7 +273,7 @@ static ERL_NIF_TERM decode_registers(ErlNifEnv * env, int argc,
 
 	struct hyper_carray *restrict arr = NULL;
 	carray_alloc(precision, &arr);
-	memcpy(arr, bin.data, HYPER_CARRAY_SIZE + arr->size);
+	memcpy(arr->items, bin.data, arr->size);
 
 	ERL_NIF_TERM erl_res = enif_make_resource(env, arr);
 	enif_release_resource(arr);
