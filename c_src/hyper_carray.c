@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <tgmath.h>
@@ -40,8 +41,10 @@ struct hyper_carray {
 	/*
 	 * Array of items each one byte in size.
 	 */
-	char *items;
+	uint8_t *items;
 };
+
+typedef struct hyper_carray *restrict carray_ptr;
 
 #define HYPER_CARRAY_SIZE sizeof(struct hyper_carray)
 
@@ -58,8 +61,7 @@ struct hyper_carray {
 /*
  * Allocate a new hyper_carray for use as an Erlang NIF resource.
  */
-static void carray_alloc(unsigned int precision,
-			 struct hyper_carray *restrict * arr)
+static void carray_alloc(unsigned int precision, carray_ptr * arr)
 {
 	unsigned int nitems = pow(2, precision);
 	size_t header_size = HYPER_CARRAY_SIZE;
@@ -78,13 +80,12 @@ static void carray_alloc(unsigned int precision,
  * Given an hyper_carray and a valid index, set the value at that index to
  * max(current value, given value).
  */
-static inline void carray_merge_item(struct hyper_carray *restrict arr,
+static inline void carray_merge_item(carray_ptr arr,
 				     unsigned int index,
 				     unsigned int value)
 {
-	char *item = arr->items + index;
-	if (value > *item)
-		*item = value;
+	uint8_t *item = arr->items + index;
+	*item = (value > *item) ? value : *item;
 }
 
 /*
@@ -97,7 +98,7 @@ static ERL_NIF_TERM new_hyper_carray(ErlNifEnv * env, int argc,
 	if (!enif_get_uint(env, argv[0], &precision))
 		return enif_make_badarg(env);
 
-	struct hyper_carray *restrict arr = NULL;
+	carray_ptr arr = NULL;
 	carray_alloc(precision, &arr);
 	memset(arr->items, 0, arr->size);
 
@@ -112,7 +113,7 @@ static ERL_NIF_TERM new_hyper_carray(ErlNifEnv * env, int argc,
 static ERL_NIF_TERM set(ErlNifEnv * env, int argc,
 			const ERL_NIF_TERM argv[])
 {
-	struct hyper_carray *restrict arr = NULL;
+	carray_ptr arr = NULL;
 	HYPER_CARRAY_OR_BADARG(argv[2], arr);
 
 	unsigned int index = 0;
@@ -151,39 +152,54 @@ static ERL_NIF_TERM max_merge(ErlNifEnv * env, int argc,
 	if (narrays < 1)
 		return enif_make_badarg(env);
 
-	void *tmp = NULL;
-	struct hyper_carray *restrict first = NULL;
-	struct hyper_carray *restrict acc = NULL;
-	struct hyper_carray *restrict curr = NULL;
-
+	carray_ptr first = NULL;
 	HYPER_CARRAY_OR_BADARG(head, first);
 
+	carray_ptr acc = NULL;
 	carray_alloc(first->precision, &acc);
 	memcpy(acc->items, first->items, acc->size);
 
-	unsigned int nitems = 0;
+	carray_ptr *arrays =
+	    (carray_ptr *) enif_alloc(narrays * sizeof(carray_ptr));
+	arrays[0] = first;
+
+	// Validate arrays
 	for (int i = 1; i < narrays; ++i) {
+		void *tmp = NULL;
+
 		if (!enif_get_list_cell(env, tail, &head, &tail)
 		    || !enif_get_resource(env, head, carray_resource,
 					  &tmp))
 			goto dealloc_and_badarg;
-		curr = tmp;
+
+		arrays[i] = tmp;
 
 		// Require uniform precision.
-		if (curr->precision != acc->precision)
+		if (arrays[i]->precision != acc->precision)
 			goto dealloc_and_badarg;
-
-		nitems = curr->size;
-		for (int j = 0; j < nitems; ++j)
-			carray_merge_item(acc, j, curr->items[j]);
 
 		continue;
 
 	      dealloc_and_badarg:
+		enif_free((void *) arrays);
 		dtor(env, acc);
 		return enif_make_badarg(env);
 	}
 
+	// Merge arrays
+	const unsigned int nitems = first->size;
+	for (carray_ptr * it = arrays + 1, *end = arrays + narrays;
+	     it != end; ++it) {
+		carray_ptr curr = *it;
+
+		for (uint8_t * accitem = acc->items, *item = curr->items,
+		     *enditem = curr->items + nitems;
+		     item != enditem; ++item, ++accitem) {
+			*accitem = (*item > *accitem) ? *item : *accitem;
+		}
+	}
+
+	enif_free((void *) arrays);
 	return enif_make_resource(env, acc);
 }
 
@@ -194,7 +210,7 @@ static ERL_NIF_TERM max_merge(ErlNifEnv * env, int argc,
 static ERL_NIF_TERM bytes(ErlNifEnv * env, int argc,
 			  const ERL_NIF_TERM argv[])
 {
-	struct hyper_carray *restrict arr = NULL;
+	carray_ptr arr = NULL;
 	HYPER_CARRAY_OR_BADARG(argv[0], arr);
 	return enif_make_int(env, HYPER_CARRAY_SIZE + arr->size);
 }
@@ -205,7 +221,7 @@ static ERL_NIF_TERM bytes(ErlNifEnv * env, int argc,
 static ERL_NIF_TERM register_sum(ErlNifEnv * env, int argc,
 				 const ERL_NIF_TERM argv[])
 {
-	struct hyper_carray *restrict arr = NULL;
+	carray_ptr arr = NULL;
 	HYPER_CARRAY_OR_BADARG(argv[0], arr);
 
 	int currval = 0;
@@ -226,7 +242,7 @@ static ERL_NIF_TERM register_sum(ErlNifEnv * env, int argc,
 static ERL_NIF_TERM zero_count(ErlNifEnv * env, int argc,
 			       const ERL_NIF_TERM argv[])
 {
-	struct hyper_carray *restrict arr = NULL;
+	carray_ptr arr = NULL;
 	HYPER_CARRAY_OR_BADARG(argv[0], arr);
 
 	unsigned int nzeros = 0;
@@ -246,7 +262,7 @@ static ERL_NIF_TERM zero_count(ErlNifEnv * env, int argc,
 static ERL_NIF_TERM encode_registers(ErlNifEnv * env, int argc,
 				     const ERL_NIF_TERM argv[])
 {
-	struct hyper_carray *restrict arr = NULL;
+	carray_ptr arr = NULL;
 	HYPER_CARRAY_OR_BADARG(argv[0], arr);
 
 	size_t nbytes = arr->size;
@@ -271,7 +287,7 @@ static ERL_NIF_TERM decode_registers(ErlNifEnv * env, int argc,
 	    || !enif_inspect_binary(env, argv[0], &bin))
 		return enif_make_badarg(env);
 
-	struct hyper_carray *restrict arr = NULL;
+	carray_ptr arr = NULL;
 	carray_alloc(precision, &arr);
 	memcpy(arr->items, bin.data, arr->size);
 
