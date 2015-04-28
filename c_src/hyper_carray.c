@@ -154,7 +154,7 @@ static ERL_NIF_TERM max_merge(ErlNifEnv * env, int argc,
 
 	carray_ptr first = NULL;
 	HYPER_CARRAY_OR_BADARG(head, first);
-    const unsigned int nitems = first->size;
+	const unsigned int nitems = first->size;
 
 	carray_ptr acc = NULL;
 	carray_alloc(first->precision, &acc);
@@ -166,7 +166,7 @@ static ERL_NIF_TERM max_merge(ErlNifEnv * env, int argc,
 
 		if (!enif_get_list_cell(env, tail, &head, &tail)
 		    || !enif_get_resource(env, head, carray_resource,
-					  (void *)&curr))
+					  (void *) &curr))
 			goto dealloc_and_badarg;
 
 		// Require uniform precision.
