@@ -154,52 +154,38 @@ static ERL_NIF_TERM max_merge(ErlNifEnv * env, int argc,
 
 	carray_ptr first = NULL;
 	HYPER_CARRAY_OR_BADARG(head, first);
+	const unsigned int nitems = first->size;
 
 	carray_ptr acc = NULL;
 	carray_alloc(first->precision, &acc);
 	memcpy(acc->items, first->items, acc->size);
 
-	carray_ptr *arrays =
-	    (carray_ptr *) enif_alloc(narrays * sizeof(carray_ptr));
-	arrays[0] = first;
-
-	// Validate arrays
+	// Merge arrays
 	for (int i = 1; i < narrays; ++i) {
-		void *tmp = NULL;
+		carray_ptr curr = NULL;
 
 		if (!enif_get_list_cell(env, tail, &head, &tail)
 		    || !enif_get_resource(env, head, carray_resource,
-					  &tmp))
+					  (void *) &curr))
 			goto dealloc_and_badarg;
-
-		arrays[i] = tmp;
 
 		// Require uniform precision.
-		if (arrays[i]->precision != acc->precision)
+		if (curr->precision != acc->precision)
 			goto dealloc_and_badarg;
-
-		continue;
-
-	      dealloc_and_badarg:
-		enif_free((void *) arrays);
-		dtor(env, acc);
-		return enif_make_badarg(env);
-	}
-
-	// Merge arrays
-	const unsigned int nitems = first->size;
-	for (carray_ptr * it = arrays + 1, *end = arrays + narrays;
-	     it != end; ++it) {
-		carray_ptr curr = *it;
 
 		for (uint8_t * accitem = acc->items, *item = curr->items,
 		     *enditem = curr->items + nitems;
 		     item != enditem; ++item, ++accitem) {
 			*accitem = (*item > *accitem) ? *item : *accitem;
 		}
+
+		continue;
+
+	      dealloc_and_badarg:
+		dtor(env, acc);
+		return enif_make_badarg(env);
 	}
 
-	enif_free((void *) arrays);
 	return enif_make_resource(env, acc);
 }
 
