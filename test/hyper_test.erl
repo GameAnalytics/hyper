@@ -17,6 +17,7 @@ hyper_test_() ->
 
     {foreach, fun () -> ok end, fun (_) -> ok end,
      [
+      ?_test(is_hyper_t()),
       ?_test(basic_t()),
       ?_test(serialization_t()),
       ?_test(reduce_precision_t()),
@@ -38,6 +39,10 @@ hyper_test_() ->
       RunProp(prop_set()),
       RunProp(prop_serialize())
      ]}.
+
+is_hyper_t() ->
+    ?assert(hyper:is_hyper(hyper:new(4, hyper_binary))),
+    ?assertNot(hyper:is_hyper(foo)).
 
 basic_t() ->
     [?assertEqual(1, trunc(

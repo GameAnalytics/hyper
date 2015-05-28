@@ -8,7 +8,7 @@
 -export([new/1, new/2, insert/2, insert_many/2]).
 -export([union/1, union/2]).
 -export([card/1, intersect_card/2]).
--export([to_json/1, from_json/1, from_json/2, precision/1, bytes/1]).
+-export([to_json/1, from_json/1, from_json/2, precision/1, bytes/1, is_hyper/1]).
 -export([compact/1, reduce_precision/2]).
 
 -type precision() :: 4..16.
@@ -38,6 +38,10 @@ new(P) ->
 -spec new(precision(), module()) -> filter().
 new(P, Mod) when 4 =< P andalso P =< 16 andalso is_atom(Mod) ->
     #hyper{p = P, registers = {Mod, Mod:new(P)}}.
+
+-spec is_hyper(filter()) -> boolean().
+is_hyper(#hyper{}) -> true;
+is_hyper(_) -> false.
 
 
 -spec insert(value(), filter()) -> filter().
