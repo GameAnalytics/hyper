@@ -186,7 +186,9 @@ static ERL_NIF_TERM max_merge(ErlNifEnv * env, int argc,
 		return enif_make_badarg(env);
 	}
 
-	return enif_make_resource(env, acc);
+	ERL_NIF_TERM erl_res = enif_make_resource(env, acc);
+	enif_release_resource(acc);
+	return erl_res;
 }
 
 /*
