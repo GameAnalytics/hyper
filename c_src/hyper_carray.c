@@ -128,7 +128,7 @@ static ERL_NIF_TERM set(ErlNifEnv * env, int argc,
 
 	carray_merge_item(arr, index, new_value);
 
-	return enif_make_resource(env, arr);
+	return argv[2];
 }
 
 void dtor(ErlNifEnv * env, void *obj);
