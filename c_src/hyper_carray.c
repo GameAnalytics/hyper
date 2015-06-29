@@ -1,4 +1,5 @@
 // Copyright (c) 2014 Johannes Huning <mail@johanneshuning.com>
+// Copyright (c) 2015 Christian Lundgren, Chris de Vries, and Jon Elverkilde
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
