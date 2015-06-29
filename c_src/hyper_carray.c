@@ -14,6 +14,10 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+// Format this file with
+//     indent -kr -i8 -sob c_src/hyper_carray.c
+// before committing.
+
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
