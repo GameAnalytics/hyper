@@ -21,7 +21,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <tgmath.h>
 
 #include "erl_nif.h"
 
@@ -68,7 +67,7 @@ typedef struct hyper_carray *restrict carray_ptr;
  */
 static void carray_alloc(unsigned int precision, carray_ptr * arr)
 {
-	unsigned int nitems = pow(2, precision);
+	unsigned int nitems = 0x01 << precision;
 	size_t header_size = HYPER_CARRAY_SIZE;
 	size_t res_size = header_size + nitems;
 
@@ -223,7 +222,7 @@ static ERL_NIF_TERM register_sum(ErlNifEnv * env, int argc,
 
 	for (int i = 0; i < size; ++i) {
 		currval = arr->items[i];
-		sum += pow(2, -currval);
+		sum += 1.0 / (double) (0x01 << currval);
 	}
 
 	return enif_make_double(env, sum);
