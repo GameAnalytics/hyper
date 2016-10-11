@@ -1,19 +1,26 @@
 // Copyright (c) 2014 Johannes Huning <mail@johanneshuning.com>
 // Copyright (c) 2015 Christian Lundgren, Chris de Vries, and Jon Elverkilde
 //
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person
+// obtaining a copy of this software and associated documentation
+// files (the "Software"), to deal in the Software without
+// restriction, including without limitation the rights to use, copy,
+// modify, merge, publish, distribute, sublicense, and/or sell copies
+// of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 //
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU Lesser General Public License for more details.
+// The above copyright notice and this permission notice shall be
+// included in all copies or substantial portions of the Software.
 //
-// You should have received a copy of the GNU Lesser General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+// BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+// ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+// CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+//
 // Format this file with
 //     indent -kr -i8 -sob c_src/hyper_carray.c
 // before committing.
@@ -21,7 +28,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <tgmath.h>
 
 #include "erl_nif.h"
 
@@ -68,7 +74,7 @@ typedef struct hyper_carray *restrict carray_ptr;
  */
 static void carray_alloc(unsigned int precision, carray_ptr * arr)
 {
-	unsigned int nitems = pow(2, precision);
+	unsigned int nitems = 0x01 << precision;
 	size_t header_size = HYPER_CARRAY_SIZE;
 	size_t res_size = header_size + nitems;
 
@@ -223,7 +229,7 @@ static ERL_NIF_TERM register_sum(ErlNifEnv * env, int argc,
 
 	for (int i = 0; i < size; ++i) {
 		currval = arr->items[i];
-		sum += pow(2, -currval);
+		sum += 1.0 / (double) (0x01 << currval);
 	}
 
 	return enif_make_double(env, sum);
