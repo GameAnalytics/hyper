@@ -9,3 +9,4 @@ erl_crash.dump
 *.o
 *.d
 .rebar
+_build

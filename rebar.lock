@@ -1,0 +1,8 @@
+[{<<"bisect">>,
+  {git,"https://github.com/knutin/bisect.git",
+       {ref,"9dc56b0d236d5c4246960f6d4412c24739f52b64"}},
+  0},
+ {<<"proper">>,
+  {git,"https://github.com/manopapad/proper.git",
+       {ref,"a57a6c64c5493b48da2c305c0cabb69204492798"}},
+  1}].
