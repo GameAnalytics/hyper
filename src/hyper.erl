@@ -242,7 +242,7 @@ random_bytes(N) ->
 
 random_bytes(Acc, 0) -> Acc;
 random_bytes(Acc, N) ->
-    Int = random:uniform(100000000000000),
+    Int = rand:uniform(100000000000000),
     random_bytes([<<Int:64/integer>> | Acc], N-1).
 
 
@@ -285,7 +285,7 @@ run_report(P, Card, Repetitions) ->
                           fun (I) ->
                                   io:format("~p values with p=~p, rep ~p~n",
                                             [Card, P, I]),
-                                  random:seed(erlang:phash2([node()]),
+                                  rand:seed(erlang:phash2([node()]),
                                               erlang:monotonic_time(),
                                               erlang:unique_integer()),
                                   Elements = generate_unique(Card),
@@ -330,7 +330,7 @@ perf_report() ->
 
     R = [begin
              io:format("."),
-             random:seed(1, 2, 3),
+             rand:seed(1, 2, 3),
 
              M = trunc(math:pow(2, P)),
              InsertUs = Time(fun (Values, H) ->

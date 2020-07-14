@@ -35,9 +35,9 @@ for lower cardinalities.
 
 The errors introduced by estimations can be seen in this example:
 ```erlang
-3> random:seed(1,2,3).
+3> rand:seed(1,2,3).
 undefined
-4> Run = fun (P, Card) -> hyper:card(lists:foldl(fun (_, H) -> Int = random:uniform(10000000000000), hyper:insert(<<Int:64/integer>>, H) end, hyper:new(P), lists:seq(1, Card))) end.
+4> Run = fun (P, Card) -> hyper:card(lists:foldl(fun (_, H) -> Int = rand:uniform(10000000000000), hyper:insert(<<Int:64/integer>>, H) end, hyper:new(P), lists:seq(1, Card))) end.
 #Fun<erl_eval.12.80484245>
 5> Run(12, 10000).
 9992.846462080579
